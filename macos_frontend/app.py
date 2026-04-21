@@ -13,14 +13,15 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
 import sys
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 import rumps
 from AppKit import (
-    NSApplication,
     NSAttributedString,
     NSColor,
     NSFont,
@@ -52,33 +53,124 @@ logging.basicConfig(
 )
 log = logging.getLogger("glucose.frontend")
 
-# Menu-only (LSUIElement) apps need to activate themselves before showing a
-# modal — otherwise the sheet can appear behind other windows or not at all.
+# Why we use AppleScript (``osascript``) dialogs instead of ``rumps.Window`` /
+# ``rumps.alert``:
 #
-# We *previously* deferred modals via ``AppHelper.callLater`` to avoid a
-# "menu stuck disabled" quirk on some macOS versions. In practice that
-# deferral silently failed to fire for some users (the frontend process
-# stayed alive but the window never appeared), so we now run the modal
-# synchronously from the menu callback. This is the standard rumps idiom.
+# Unbundled Python processes started by launchd don't have a proper
+# ``Info.plist`` with a ``CFBundleIdentifier``. Several AppKit UI APIs
+# refuse to work in that context — ``rumps.notification`` is the
+# documented example (see ``notifier.py``), and ``NSAlert.runModal`` /
+# ``rumps.Window.run`` behave similarly: the call appears to start, but
+# AppKit silently marks the process as misbehaving and ``launchd``
+# tears it down a few seconds later. There's no crash report, just a
+# clean exit and a relaunch — which from the user's perspective looks
+# like "the menu went dead and nothing happened".
+#
+# ``osascript`` shells out to a properly bundled helper process
+# (``System Events``) to host the dialog, so this works regardless of
+# how our own process was launched. It's also the fallback the
+# notification backend in ``notifier.py`` already uses, for the same
+# underlying reason.
+#
+# Running the osascript subprocess on the main thread would block the
+# rumps runloop for the whole time the dialog is up, freezing the
+# menubar title. So the whole dialog flow runs on a background thread.
+# Subprocess + keychain writes are safe off the main thread; the only
+# thing that strictly isn't is UI mutation, and the next poll tick
+# (which rumps drives on the main thread) picks up state changes.
 
 
-def _activate_for_modal() -> None:
-    NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+def _applescript_escape(s: str) -> str:
+    return s.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def _run_modal(fn) -> None:
-    """Activate the app and invoke a function that shows a modal window.
+def _osascript_dialog(
+    *,
+    title: str,
+    message: str,
+    default_text: str = "",
+    ok: str = "OK",
+    cancel: str = "Cancel",
+    hidden_answer: bool = False,
+) -> tuple[bool, str]:
+    """Show a text-input dialog. Returns ``(clicked_ok, text)``.
 
-    Any exception raised while showing the modal is logged instead of
-    bubbling up — a traceback inside a rumps callback kills the status
-    item, which would look identical to "menu item does nothing" to the
-    user but is much harder to recover from.
+    On cancel / close / error, returns ``(False, "")``.
     """
-    _activate_for_modal()
+    parts = [
+        f'display dialog "{_applescript_escape(message)}"',
+        f'default answer "{_applescript_escape(default_text)}"',
+        f'with title "{_applescript_escape(title)}"',
+        f'buttons {{"{_applescript_escape(cancel)}", "{_applescript_escape(ok)}"}}',
+        f'default button "{_applescript_escape(ok)}"',
+        f'cancel button "{_applescript_escape(cancel)}"',
+    ]
+    if hidden_answer:
+        parts.append("with hidden answer")
+    # ``tell application "System Events"`` is what makes the dialog
+    # reliably appear in front regardless of our own app-activation
+    # state, which is exactly the problem we can't solve for unbundled
+    # Python.
+    script = (
+        'tell application "System Events"\nactivate\n'
+        + " ".join(parts)
+        + "\nend tell"
+    )
+    proc = subprocess.run(
+        ["/usr/bin/osascript", "-e", script],
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip()
+        # Exit 1 + "-128" = user hit Cancel / closed the dialog.
+        if "-128" in stderr or "User canceled" in stderr:
+            return False, ""
+        log.warning("osascript dialog failed: %s", stderr)
+        return False, ""
+    out = (proc.stdout or "").strip()
+    # Format: "button returned:<ok>, text returned:<value>".
+    text = ""
+    marker = "text returned:"
+    if marker in out:
+        text = out[out.index(marker) + len(marker):].strip()
+    return True, text
+
+
+def _osascript_alert(*, title: str, message: str) -> None:
+    """Show a one-button informational alert. Errors are logged, not raised."""
+    script = (
+        'tell application "System Events"\nactivate\n'
+        f'display alert "{_applescript_escape(title)}" '
+        f'message "{_applescript_escape(message)}"\n'
+        "end tell"
+    )
     try:
-        fn()
+        subprocess.run(
+            ["/usr/bin/osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
     except Exception:  # noqa: BLE001
-        log.exception("Modal callback failed")
+        log.exception("osascript alert failed")
+
+
+def _run_in_background(fn) -> None:
+    """Run ``fn()`` on a daemon thread so the menu callback returns fast.
+
+    Exceptions are logged, never propagated — a worker thread that dies
+    with an uncaught exception is invisible to the user otherwise.
+    """
+
+    def _target() -> None:
+        try:
+            fn()
+        except Exception:  # noqa: BLE001
+            log.exception("Background menu handler failed")
+
+    threading.Thread(target=_target, daemon=True).start()
 
 
 # Map daemon Status values to a single-character / short-text menubar title
@@ -348,8 +440,8 @@ class GlucoseApp(rumps.App):
 
     def _on_toggle_notifications(self, sender) -> None:
         if self._notifier is None:
-            _run_modal(
-                lambda: rumps.alert(
+            _run_in_background(
+                lambda: _osascript_alert(
                     title="Notifications unavailable",
                     message="Notifier was not initialised. Restart the frontend.",
                 )
@@ -363,57 +455,40 @@ class GlucoseApp(rumps.App):
 
     def _on_edit_credentials(self, _sender) -> None:
         log.info("Update credentials clicked")
-        _run_modal(self._edit_credentials_impl)
+        _run_in_background(self._edit_credentials_impl)
 
     def _edit_credentials_impl(self) -> None:
-        """Capture email + password with two prompts and save to Keychain.
-
-        rumps has no native multi-field form. Two consecutive Windows is
-        a bit crude but lets us use ``secure=True`` on the password one,
-        which matters more than having everything on one screen."""
-        email_window = rumps.Window(
-            title="LibreLinkUp email",
+        """Capture email + password with two dialogs and save to Keychain."""
+        ok, email = _osascript_dialog(
+            title="LibreLinkUp Email",
             message="Enter the email associated with your LibreLinkUp account.",
-            default_text="",
             ok="Next",
-            cancel="Cancel",
-            dimensions=(320, 22),
         )
-        result = email_window.run()
-        if not result.clicked or not result.text.strip():
+        if not ok:
             return
-        email = result.text.strip()
+        email = email.strip()
+        if not email:
+            return
 
-        pw_window = rumps.Window(
-            title="LibreLinkUp password",
+        ok, password = _osascript_dialog(
+            title="LibreLinkUp Password",
             message="Password is stored in the macOS Keychain, not on disk.",
-            default_text="",
             ok="Save",
-            cancel="Cancel",
-            dimensions=(320, 22),
+            hidden_answer=True,
         )
-        # rumps doesn't expose secure text entry directly; the NSSecureTextField
-        # attribute is set by passing ``secure=True`` in newer versions. Older
-        # rumps ignores unknown kwargs, so this degrades gracefully.
-        try:
-            pw_window.secure = True  # type: ignore[attr-defined]
-        except Exception:  # noqa: BLE001
-            pass
-        pw_result = pw_window.run()
-        if not pw_result.clicked or not pw_result.text:
+        if not ok or not password:
             return
+
         try:
-            save_credentials(email=email, password=pw_result.text)
+            save_credentials(email=email, password=password)
         except Exception as e:  # noqa: BLE001
-            _activate_for_modal()
-            rumps.alert(
-                title="Could not save credentials",
+            _osascript_alert(
+                title="Could Not Save Credentials",
                 message=f"{e}\n\nYou can still set LIBRELINKUP_EMAIL/_PASSWORD in .env.",
             )
             return
-        _activate_for_modal()
-        rumps.alert(
-            title="Credentials saved",
+        _osascript_alert(
+            title="Credentials Saved",
             message=(
                 f"Stored under Keychain service '{KEYCHAIN_SERVICE}'. "
                 "Click 'Force Re-Authenticate' to use them now."
@@ -422,16 +497,15 @@ class GlucoseApp(rumps.App):
 
     def _on_edit_thresholds(self, _sender) -> None:
         log.info("Set thresholds clicked")
-        _run_modal(self._edit_thresholds_impl)
+        _run_in_background(self._edit_thresholds_impl)
 
     def _edit_thresholds_impl(self) -> None:
         """Prompt for the three colour thresholds. Session-only; see below."""
-        window = rumps.Window(
-            title="Glucose thresholds (mg/dL)",
+        ok, response = _osascript_dialog(
+            title="Glucose Thresholds (mg/dL)",
             message=(
                 "Three numbers separated by commas: low, high, very_high.\n"
-                "Current: "
-                f"{int(self.thresholds.low)}, "
+                f"Current: {int(self.thresholds.low)}, "
                 f"{int(self.thresholds.high)}, "
                 f"{int(self.thresholds.very_high)}.\n\n"
                 "To persist across restarts, set THRESHOLD_LOW_MG_DL, "
@@ -443,30 +517,32 @@ class GlucoseApp(rumps.App):
                 f"{int(self.thresholds.very_high)}"
             ),
             ok="Apply",
-            cancel="Cancel",
-            dimensions=(320, 22),
         )
-        result = window.run()
-        if not result.clicked:
+        if not ok:
             return
         try:
-            parts = [float(x.strip()) for x in result.text.split(",")]
+            parts = [float(x.strip()) for x in response.split(",")]
             if len(parts) != 3:
                 raise ValueError("expected three numbers")
             low, high, very_high = parts
             if not (low < high < very_high):
                 raise ValueError("must satisfy low < high < very_high")
         except Exception as e:  # noqa: BLE001
-            _activate_for_modal()
-            rumps.alert(title="Invalid thresholds", message=str(e))
+            _osascript_alert(title="Invalid Thresholds", message=str(e))
             return
 
+        # Mutating shared state from a worker thread: the frontend is
+        # single-reader on the main thread (the poll tick), and these
+        # attribute writes are atomic in CPython, so we don't need a
+        # lock for correctness. Worst case: one tick uses old thresholds.
         self.thresholds = ColorThresholds(low=low, high=high, very_high=very_high)
         if self._notifier is not None:
             self._notifier.policy.low = low
             self._notifier.policy.high = high
             self._notifier.policy.very_high = very_high
-        self._on_tick(None)
+        # The next rumps timer tick will re-render with the new thresholds
+        # — we deliberately don't call ``_on_tick`` here because that
+        # would touch AppKit UI off the main thread.
 
 
 def _build_notifier(thresholds: ColorThresholds) -> Notifier:
