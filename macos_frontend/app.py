@@ -28,7 +28,6 @@ from AppKit import (
     NSForegroundColorAttributeName,
 )
 from dotenv import load_dotenv
-from PyObjCTools import AppHelper
 
 # Allow ``python -m macos_frontend`` and ``python macos_frontend/app.py``.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -53,26 +52,33 @@ logging.basicConfig(
 )
 log = logging.getLogger("glucose.frontend")
 
-# Showing ``NSAlert.runModal()`` / ``rumps.Window.run()`` *synchronously* from a
-# status-item menu callback leaves the menu stuck disabled on some macOS
-# versions — the menu never finishes its teardown. Defer modals slightly so
-# the tracking session completes first.
+# Menu-only (LSUIElement) apps need to activate themselves before showing a
+# modal — otherwise the sheet can appear behind other windows or not at all.
 #
-# Menu-only (LSUIElement) apps also need activation before ``runModal`` or the
-# sheet may not appear and the menu session can stay wedged.
-_MENU_MODAL_DELAY_SEC = 0.25
+# We *previously* deferred modals via ``AppHelper.callLater`` to avoid a
+# "menu stuck disabled" quirk on some macOS versions. In practice that
+# deferral silently failed to fire for some users (the frontend process
+# stayed alive but the window never appeared), so we now run the modal
+# synchronously from the menu callback. This is the standard rumps idiom.
 
 
 def _activate_for_modal() -> None:
     NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
 
 
-def _defer_modal(fn) -> None:
-    def _run() -> None:
-        _activate_for_modal()
-        fn()
+def _run_modal(fn) -> None:
+    """Activate the app and invoke a function that shows a modal window.
 
-    AppHelper.callLater(_MENU_MODAL_DELAY_SEC, _run)
+    Any exception raised while showing the modal is logged instead of
+    bubbling up — a traceback inside a rumps callback kills the status
+    item, which would look identical to "menu item does nothing" to the
+    user but is much harder to recover from.
+    """
+    _activate_for_modal()
+    try:
+        fn()
+    except Exception:  # noqa: BLE001
+        log.exception("Modal callback failed")
 
 
 # Map daemon Status values to a single-character / short-text menubar title
@@ -342,7 +348,7 @@ class GlucoseApp(rumps.App):
 
     def _on_toggle_notifications(self, sender) -> None:
         if self._notifier is None:
-            _defer_modal(
+            _run_modal(
                 lambda: rumps.alert(
                     title="Notifications unavailable",
                     message="Notifier was not initialised. Restart the frontend.",
@@ -356,7 +362,8 @@ class GlucoseApp(rumps.App):
         )
 
     def _on_edit_credentials(self, _sender) -> None:
-        _defer_modal(self._edit_credentials_impl)
+        log.info("Update credentials clicked")
+        _run_modal(self._edit_credentials_impl)
 
     def _edit_credentials_impl(self) -> None:
         """Capture email + password with two prompts and save to Keychain.
@@ -414,7 +421,8 @@ class GlucoseApp(rumps.App):
         )
 
     def _on_edit_thresholds(self, _sender) -> None:
-        _defer_modal(self._edit_thresholds_impl)
+        log.info("Set thresholds clicked")
+        _run_modal(self._edit_thresholds_impl)
 
     def _edit_thresholds_impl(self) -> None:
         """Prompt for the three colour thresholds. Session-only; see below."""
