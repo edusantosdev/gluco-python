@@ -15,6 +15,7 @@ import logging
 import os
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import rumps
@@ -111,13 +112,68 @@ def _color_for(value_mg_dl: float, t: ColorThresholds):
 
 
 def _format_status_line(reading: CurrentReading) -> str:
-    if reading.status == "ok":
-        age = reading.reading_age_seconds
-        return f"Status: ok ({reading.unit or ''}) — sensor age {age}s"
-    if reading.status == "stale":
-        age = reading.reading_age_seconds
-        return f"Status: stale — sensor age {age}s"
-    return f"Status: {reading.status.replace('_', ' ')}"
+    if reading.status in ("ok", "stale"):
+        return f"Updated: {_humanize_age(reading.reading_age_seconds)}"
+    return _STATUS_TEXT.get(reading.status, "Status: unavailable")
+
+
+def _format_detail_line(reading: CurrentReading) -> str:
+    local_hhmm = _to_local_hhmm(reading.sensor_timestamp)
+    unit = reading.unit or ""
+    if local_hhmm != "—":
+        if unit:
+            return f"Last reading: {local_hhmm} ({unit})"
+        return f"Last reading: {local_hhmm}"
+    if reading.status in ("ok", "stale"):
+        return "Last reading: —"
+    return _DETAIL_TEXT.get(reading.status, "Waiting for next update")
+
+
+def _humanize_age(age_seconds: int | None) -> str:
+    if age_seconds is None:
+        return "unknown"
+    if age_seconds < 0:
+        # Clock skew or bad payload timestamp; avoid showing confusing negatives.
+        return "just now"
+    if age_seconds < 60:
+        return "just now"
+    minutes = age_seconds // 60
+    if minutes < 60:
+        return "1 min ago" if minutes == 1 else f"{minutes} min ago"
+    hours = minutes // 60
+    return "1 hour ago" if hours == 1 else f"{hours} hours ago"
+
+
+def _to_local_hhmm(timestamp_iso: str | None) -> str:
+    if not timestamp_iso:
+        return "—"
+    try:
+        # Daemon sends UTC with trailing Z.
+        dt = datetime.fromisoformat(timestamp_iso.replace("Z", "+00:00"))
+        return dt.astimezone().strftime("%H:%M")
+    except Exception:  # noqa: BLE001
+        return "—"
+
+
+_STATUS_TEXT = {
+    "starting": "Connecting…",
+    "warming_up": "Sensor warming up",
+    "sensor_ended": "Sensor ended",
+    "no_network": "No internet connection",
+    "auth_failed": "Sign-in required",
+    "tos_required": "Open Libre app to accept terms",
+    "rate_limited": "Temporarily rate-limited",
+}
+
+_DETAIL_TEXT = {
+    "starting": "Getting first reading",
+    "warming_up": "Try again in a few minutes",
+    "sensor_ended": "Replace sensor in Libre app",
+    "no_network": "Check Wi-Fi and try Refresh now",
+    "auth_failed": "Use Force re-authenticate",
+    "tos_required": "Accept prompts in official Libre app",
+    "rate_limited": "Will retry automatically",
+}
 
 
 class GlucoseApp(rumps.App):
@@ -189,12 +245,14 @@ class GlucoseApp(rumps.App):
         except DaemonUnreachable as e:
             log.warning("Daemon unreachable: %s", e)
             self._set_title("⚠ daemon")
-            self._status_item.title = "Status: daemon unreachable"
+            self._status_item.title = "Background service is offline"
+            self._sensor_item.title = "Start daemon first"
             return
         except DaemonError as e:
             log.warning("Daemon error: %s", e)
             self._set_title("⚠ daemon")
-            self._status_item.title = f"Status: daemon error — {e}"
+            self._status_item.title = "Background service error"
+            self._sensor_item.title = "Try Force re-authenticate"
             return
 
         title = _format_title(reading)
@@ -208,13 +266,7 @@ class GlucoseApp(rumps.App):
         self._set_title(title, color=color)
 
         self._status_item.title = _format_status_line(reading)
-        if reading.sensor_timestamp:
-            # ISO 8601 with a 'T' separator; show just HH:MM for the menu.
-            try:
-                hhmm = reading.sensor_timestamp[11:16]
-            except (TypeError, IndexError):
-                hhmm = "—"
-            self._sensor_item.title = f"Sensor: {hhmm}"
+        self._sensor_item.title = _format_detail_line(reading)
 
     def _on_refresh(self, _sender) -> None:
         log.info("Manual refresh")
