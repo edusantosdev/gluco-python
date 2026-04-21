@@ -45,9 +45,34 @@ class Settings(BaseSettings):
 
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
+    # Backoff policy for network errors (seconds).
+    # Starts at ``base``, doubles each failure, caps at ``cap``, with equal jitter.
+    error_backoff_base_seconds: float = Field(
+        default=10.0, alias="ERROR_BACKOFF_BASE_SECONDS"
+    )
+    error_backoff_cap_seconds: float = Field(
+        default=300.0, alias="ERROR_BACKOFF_CAP_SECONDS"
+    )
+
+    # Backoff policy for rate-limit responses that don't carry Retry-After.
+    ratelimit_backoff_base_seconds: float = Field(
+        default=30.0, alias="RATELIMIT_BACKOFF_BASE_SECONDS"
+    )
+    ratelimit_backoff_cap_seconds: float = Field(
+        default=600.0, alias="RATELIMIT_BACKOFF_CAP_SECONDS"
+    )
+
     @property
     def lock_path(self) -> Path:
         return self.state_dir / "daemon.lock"
+
+    @property
+    def session_path(self) -> Path:
+        return self.state_dir / "session.json"
+
+    @property
+    def log_path(self) -> Path:
+        return self.state_dir / "daemon.log"
 
 
 def load_settings() -> Settings:

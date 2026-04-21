@@ -9,21 +9,27 @@ we run the poller in a dedicated daemon thread. FastAPI handlers stay
 ``async`` and do non-blocking reads from a lock-guarded ``DaemonState``
 snapshot. This decouples poll cadence from request latency entirely.
 
-Phase 3 adds:
-    * disk-backed session persistence (``FileSessionStore``)
-    * proper exponential backoff with jitter
-    * rotating log file
-    * sensor warm-up / sensor-ended detection
+Phase 3 additions (this revision)
+---------------------------------
 
-Phase 2 ships with the simplest viable versions of those: in-memory
-session, fixed retry interval on failure, console logging only.
+* Disk-backed session persistence via :class:`FileSessionStore`, so
+  daemon restarts don't trigger a fresh LibreView login.
+* :class:`ExponentialBackoff` for network errors and rate-limit waits,
+  with a dedicated instance per failure mode so one doesn't penalise
+  the other.
+* One-shot auth refresh on ``AuthenticationError`` inside a poll — we
+  drop the cached JWT, re-authenticate, retry once, and then fall
+  through to backoff if that still fails.
+* Sensor warm-up detection from the ``Sensor`` metadata (``a`` +
+  ``w``-minutes vs now).
 """
 
 from __future__ import annotations
 
 import logging
 import threading
-from copy import copy
+import time
+import warnings
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -36,12 +42,16 @@ from pylibrelinkup import (
     TermsOfUseError,
 )
 
+from .backoff import ExponentialBackoff
+from .session_store import FileSessionStore
 from .state import DaemonState, Status
 
 log = logging.getLogger(__name__)
 
-# Conservative fallback when an exception type doesn't carry retry guidance.
-_BACKOFF_ON_ERROR_SECONDS = 30
+
+# Wait-after policy for states that shouldn't participate in normal backoff:
+# TOS_REQUIRED can't self-heal — the user needs to click accept — so we
+# just poke it every few minutes.
 _BACKOFF_ON_TOS_SECONDS = 300
 
 
@@ -53,6 +63,9 @@ class GlucoseService:
         region: APIUrl,
         poll_interval: int,
         stale_after_seconds: int,
+        session_store: FileSessionStore | None = None,
+        error_backoff: ExponentialBackoff | None = None,
+        ratelimit_backoff: ExponentialBackoff | None = None,
     ) -> None:
         self._email = email
         self._password = password
@@ -68,15 +81,37 @@ class GlucoseService:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
+        self._session_store = session_store
+        self._error_backoff = error_backoff or ExponentialBackoff(
+            base_seconds=10, cap_seconds=300
+        )
+        self._ratelimit_backoff = ratelimit_backoff or ExponentialBackoff(
+            base_seconds=30, cap_seconds=600
+        )
+
     # --- lifecycle ---
 
     def start(self) -> None:
-        """Authenticate (best-effort) and launch the poller thread."""
-        if not self._authenticate_once():
-            log.warning(
-                "Initial authentication failed (status=%s). Daemon will keep retrying.",
-                self.snapshot().status.value,
-            )
+        """Restore session (if any), authenticate if needed, launch the poller."""
+        if self._try_restore_session():
+            # We have a valid cached JWT; patient list still requires a
+            # round-trip but at least we skip the password submission.
+            try:
+                self._load_patient()
+            except AuthenticationError:
+                # Cached token turned out to be invalid — purge and re-auth.
+                self._clear_session()
+                self._authenticate_once(force=True)
+            except Exception as e:  # noqa: BLE001
+                log.warning("Post-restore patient fetch failed: %s", e)
+                # Leave self.patient = None; _tick will re-attempt.
+        else:
+            if not self._authenticate_once():
+                log.warning(
+                    "Initial authentication failed (status=%s). Daemon will keep retrying.",
+                    self.snapshot().status.value,
+                )
+
         self._thread = threading.Thread(
             target=self._poll_loop, name="glucose-poller", daemon=True
         )
@@ -95,17 +130,18 @@ class GlucoseService:
     def snapshot(self) -> DaemonState:
         """Return a thread-safe shallow copy of current state."""
         with self._lock:
-            # ``replace`` on a dataclass produces a new instance; the embedded
-            # ``reading`` reference is shared but immutable in practice.
+            # ``replace`` produces a new instance; the embedded ``reading``
+            # reference is shared but immutable in practice.
             snap = replace(self._state)
             snap.reading = self._state.reading  # explicit, not deep-copied
             return snap
 
     def force_refresh(self) -> DaemonState:
-        """Re-authenticate and poll once on the calling thread.
+        """Re-authenticate (dropping any cached session) and poll once.
 
-        Used by ``POST /auth/refresh``. Runs synchronously so the caller
-        gets the new state in the same response."""
+        Used by ``POST /auth/refresh``. Runs on the caller's thread so the
+        HTTP response reflects the new state."""
+        self._clear_session()
         self._authenticate_once(force=True)
         if self.patient is not None:
             try:
@@ -114,7 +150,7 @@ class GlucoseService:
                 self._handle_poll_error(e)
         return self.snapshot()
 
-    # --- internals ---
+    # --- internals: state mutation ---
 
     def _set_state(
         self,
@@ -140,7 +176,59 @@ class GlucoseService:
             if reset_failures:
                 self._state.consecutive_failures = 0
 
+    # --- internals: auth / session ---
+
+    def _try_restore_session(self) -> bool:
+        """If a valid session exists on disk, apply it to the client.
+
+        Returns True iff the client is now authenticated (JWT set)."""
+        if self._session_store is None:
+            return False
+        session = self._session_store.load()
+        if session is None:
+            return False
+        self.client.token = session.token
+        self.client.account_id_hash = session.account_id_hash
+        log.info(
+            "Restored LibreView session from disk (expires in %ds)",
+            int(session.expires_at - time.time()),
+        )
+        return True
+
+    def _persist_session(self) -> None:
+        if self._session_store is None:
+            return
+        if not self.client.token or not self.client.account_id_hash:
+            return
+        try:
+            self._session_store.save(self.client.token, self.client.account_id_hash)
+        except OSError as e:
+            log.warning("Could not persist session: %s", e)
+
+    def _clear_session(self) -> None:
+        if self._session_store is not None:
+            self._session_store.clear()
+
+    def _load_patient(self) -> None:
+        """Fetch & cache the first patient. Raises on failure."""
+        patients = self.client.get_patients()
+        if not patients:
+            self._set_state(
+                status=Status.AUTH_FAILED,
+                last_error="No patients shared with this account",
+            )
+            self.patient = None
+            return
+        self.patient = patients[0]
+        log.info(
+            "Using patient=%s %s",
+            self.patient.first_name,
+            self.patient.last_name,
+        )
+        self._set_state(last_error=None)
+
     def _authenticate_once(self, *, force: bool = False) -> bool:
+        """Do a full login round-trip. Persist the new session on success."""
         try:
             if force:
                 # Re-instantiate so any cached JWT inside the client is dropped.
@@ -148,25 +236,13 @@ class GlucoseService:
                     email=self._email, password=self._password, api_url=self._region
                 )
             self.client.authenticate()
-            patients = self.client.get_patients()
-            if not patients:
-                self._set_state(
-                    status=Status.AUTH_FAILED,
-                    last_error="No patients shared with this account",
-                )
-                self.patient = None
-                return False
-            self.patient = patients[0]
-            log.info(
-                "Authenticated; patient=%s %s",
-                self.patient.first_name,
-                self.patient.last_name,
-            )
-            self._set_state(last_error=None)
-            return True
+            self._persist_session()
+            self._load_patient()
+            return self.patient is not None
         except (TermsOfUseError, PrivacyPolicyError) as e:
             self._set_state(status=Status.TOS_REQUIRED, last_error=str(e))
         except AuthenticationError as e:
+            self._clear_session()
             self._set_state(status=Status.AUTH_FAILED, last_error=str(e))
         except LLUAPIRateLimitError as e:
             self._set_state(
@@ -178,6 +254,8 @@ class GlucoseService:
             self._set_state(status=Status.NO_NETWORK, last_error=f"{type(e).__name__}: {e}")
         self.patient = None
         return False
+
+    # --- internals: poll loop ---
 
     def _poll_loop(self) -> None:
         log.info("Poller started (interval=%ss)", self.poll_interval)
@@ -201,34 +279,91 @@ class GlucoseService:
 
         if self.patient is None:
             if not self._authenticate_once():
-                return _BACKOFF_ON_ERROR_SECONDS
+                return self._error_backoff.next_delay()
 
         try:
             self._poll_once()
+            self._error_backoff.reset()
+            self._ratelimit_backoff.reset()
             return self.poll_interval
         except AuthenticationError:
-            log.info("Auth expired; re-authenticating")
-            self._authenticate_once(force=True)
-            return min(self.poll_interval, _BACKOFF_ON_ERROR_SECONDS)
+            # JWT expired mid-session. Drop the cached one and try once more
+            # right now — if that also fails, fall through to normal backoff.
+            log.info("Auth expired; refreshing and retrying once")
+            self._clear_session()
+            if self._authenticate_once(force=True):
+                try:
+                    self._poll_once()
+                    self._error_backoff.reset()
+                    return self.poll_interval
+                except Exception as e:  # noqa: BLE001
+                    self._handle_poll_error(e)
+            return self._error_backoff.next_delay()
         except LLUAPIRateLimitError as e:
-            retry = getattr(e, "retry_after", None) or _BACKOFF_ON_ERROR_SECONDS
+            retry = getattr(e, "retry_after", None)
+            # Trust the server hint when provided; fall back to our own
+            # escalating schedule so repeated 429s keep stretching.
+            delay = float(retry) if retry else self._ratelimit_backoff.next_delay()
             self._set_state(
                 status=Status.RATE_LIMITED,
-                last_error=f"retry_after={retry}s",
+                last_error=f"retry_after={retry or int(delay)}s",
                 bump_failures=True,
             )
-            return float(retry)
+            return delay
         except (TermsOfUseError, PrivacyPolicyError) as e:
-            self._set_state(status=Status.TOS_REQUIRED, last_error=str(e), bump_failures=True)
+            self._set_state(
+                status=Status.TOS_REQUIRED, last_error=str(e), bump_failures=True
+            )
             return _BACKOFF_ON_TOS_SECONDS
         except Exception as e:  # noqa: BLE001
             self._handle_poll_error(e)
-            return _BACKOFF_ON_ERROR_SECONDS
+            return self._error_backoff.next_delay()
 
     def _poll_once(self) -> None:
+        """Hit the ``/graph`` endpoint once and fold the result into state.
+
+        We request the full graph response (not just ``latest()``) because
+        an empty ``graph_data`` list is our most reliable signal that the
+        sensor is in its warm-up window — Libre publishes the start metadata
+        but no measurements yet. ``latest()`` would raise or yield stale data.
+        """
         assert self.patient is not None  # invariant: caller checks
-        reading = self.client.latest(self.patient)
+        # ``pylibrelinkup.read()`` is deprecated but still the only public
+        # method that returns the full GraphResponse (with connection +
+        # sensor metadata we need for warm-up detection). ``graph()`` drops
+        # the connection envelope. We silence the deprecation warning.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            graph_response = self.client.read(self.patient)
+
         now = datetime.now(UTC)
+        connection = getattr(graph_response.data, "connection", None)
+        history = getattr(graph_response.data, "graph_data", None) or []
+
+        # Warm-up check: sensor metadata present, but no measurements yet.
+        # After warm-up, ``graph_data`` is populated on every poll.
+        if connection is not None and not history:
+            if self._is_in_warmup(connection):
+                self._set_state(
+                    status=Status.WARMING_UP,
+                    reading=None,
+                    fetched_at=now,
+                    last_error=None,
+                    reset_failures=True,
+                )
+                return
+
+        reading = getattr(connection, "glucose_measurement", None)
+        if reading is None:
+            # Unusual: no warm-up, no reading, no measurements. Treat as stale.
+            self._set_state(
+                status=Status.STALE,
+                fetched_at=now,
+                last_error="LibreView returned no current measurement",
+                bump_failures=True,
+            )
+            return
+
         new_status = self._classify(reading, now)
         self._set_state(
             status=new_status,
@@ -237,6 +372,27 @@ class GlucoseService:
             last_error=None,
             reset_failures=True,
         )
+
+    # --- internals: classification ---
+
+    def _is_in_warmup(self, connection: object) -> bool:
+        """True iff the sensor is still inside its warm-up window.
+
+        The FreeStyle Libre ``Sensor`` record carries:
+            * ``a``: activation time in unix seconds
+            * ``w``: warm-up duration in **minutes** (60 for Libre 2/3)
+        Readings during this window aren't published; the consumer should
+        show a friendly "warming up" indicator rather than "no data".
+        """
+        sensor = getattr(connection, "sensor", None)
+        if sensor is None:
+            return False
+        activation = getattr(sensor, "a", None)
+        warmup_minutes = getattr(sensor, "w", None)
+        if not activation or not warmup_minutes:
+            return False
+        ready_at = activation + (warmup_minutes * 60)
+        return ready_at > datetime.now(UTC).timestamp()
 
     def _classify(self, reading: object, now: datetime) -> Status:
         # ``factory_timestamp`` is the tz-aware UTC one; ``timestamp`` is

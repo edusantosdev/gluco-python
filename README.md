@@ -10,7 +10,7 @@ for the full plan and reasoning.
 - **Phase 0** — API verification — ✅ done
 - **Phase 1** — Monolithic MVP (`mvp.py`) — ✅ done
 - **Phase 2** — Daemon split (FastAPI + thin frontend) — ✅ done
-- **Phase 3** — Robustness (session persistence, backoff, log rotation) — pending
+- **Phase 3** — Robustness (session persistence, backoff, log rotation, warm-up detection) — ✅ done
 - **Phase 4** — macOS polish (LaunchAgent, Keychain, notifications) — pending
 - **Phase 5** — Linux port — pending
 
@@ -120,8 +120,12 @@ All settings come from `.env` (or environment variables). The full set:
 | `STALE_AFTER_SECONDS`     | `360`                | sensor timestamp older than this → `stale`   |
 | `DAEMON_HOST`             | `127.0.0.1`          | bind address; do not expose publicly         |
 | `DAEMON_PORT`             | `8765`               |                                              |
-| `DAEMON_STATE_DIR`        | `~/.glucose-display` | lockfile (and Phase 3 session/logs)          |
+| `DAEMON_STATE_DIR`        | `~/.glucose-display` | lockfile, session cache, rotating log        |
 | `LOG_LEVEL`               | `INFO`               | `DEBUG` for verbose                          |
+| `ERROR_BACKOFF_BASE_SECONDS`   | `10`            | first wait after a network failure           |
+| `ERROR_BACKOFF_CAP_SECONDS`    | `300`           | max wait between retries                     |
+| `RATELIMIT_BACKOFF_BASE_SECONDS` | `30`          | first wait after a 429 with no `Retry-After` |
+| `RATELIMIT_BACKOFF_CAP_SECONDS`  | `600`         | max rate-limit wait                          |
 | `DAEMON_URL` (frontend)   | `http://127.0.0.1:8765` |                                          |
 | `FRONTEND_POLL_SECONDS`   | `30`                 | how often the menubar refreshes from daemon  |
 | `THRESHOLD_LOW_MG_DL`     | `70`                 | menubar text turns red below this            |
@@ -145,11 +149,36 @@ e.g. 70 is green, 250 is yellow — so you don't get nagged for being on
 the edge of a target. Override via the env vars above. Error glyphs
 (`⚠ auth`, `⚠ net`, etc.) use the system default text colour.
 
+## Operational notes (Phase 3)
+
+The daemon persists its LibreView JWT to `~/.glucose-display/session.json`
+(mode 0600) and reuses it across restarts, so a reboot or `launchctl kickstart`
+no longer triggers a fresh Abbott login. A token that the server rejects mid-poll
+triggers a single silent refresh; repeated failures fall back to exponential
+backoff with jitter.
+
+Network errors and rate-limit responses use independent backoff counters:
+one stretched-out `ConnectionError` run won't cause the next 429 to start
+already-escalated. A successful poll resets both.
+
+Sensor warm-up (the first 60 minutes of a new sensor) is reported as
+`warming_up` — the daemon knows from the sensor metadata that measurements
+are deliberately absent, so the menubar shows the warm-up glyph instead of
+a network error.
+
+Logs are written to `~/.glucose-display/daemon.log` (1 MB × 3 backups). The
+daemon also installs `SIGTERM`/`SIGINT` handlers so `launchctl stop` exits
+cleanly, writing a `Poller stopped` line before returning.
+
+Run the test suite:
+
+```bash
+.venv/bin/python -m pytest tests/
+```
+
 ## What it deliberately does not do (yet)
 
-- Re-use sessions across daemon restarts (forces a fresh login on every boot)
-- Retry network errors with backoff/jitter (currently fixed 30-second retry)
-- Detect sensor warm-up or sensor-ended state explicitly
 - Run as a LaunchAgent, store creds in Keychain, or bundle as a `.app`
+- Port to Linux (AppIndicator / tray)
 
 These are tracked in the [implementation plan](./glucose-menubar-implementation-plan.md).
