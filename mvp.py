@@ -28,6 +28,7 @@ from pylibrelinkup import (
     TermsOfUseError,
 )
 
+from glucose_common.regions import resolve_librelinkup_region
 from glucose_common.trend import trend_symbol
 
 logging.basicConfig(
@@ -44,14 +45,6 @@ GLYPH_TOS = "⚠ ToS"
 GLYPH_RATE = "⚠ rate"
 GLYPH_NET = "⚠ net"
 GLYPH_UNKNOWN = "⚠"
-
-
-def _resolve_region(name: str) -> APIUrl:
-    try:
-        return APIUrl[name.upper()]
-    except KeyError:
-        valid = ", ".join(m.name for m in APIUrl)
-        raise SystemExit(f"Unknown LIBRELINKUP_REGION '{name}'. Valid: {valid}")
 
 
 class GlucoseApp(rumps.App):
@@ -189,9 +182,12 @@ def main() -> int:
         )
         return 1
 
-    region = _resolve_region(os.environ.get("LIBRELINKUP_REGION", "US"))
+    region_raw = os.environ.get("LIBRELINKUP_REGION", "US")
+    region, region_hint = resolve_librelinkup_region(region_raw)
     poll_interval = int(os.environ.get("POLL_INTERVAL_SECONDS", "60"))
 
+    if region_hint:
+        log.info("%s", region_hint)
     log.info("Starting MVP (region=%s, poll=%ss)", region.name, poll_interval)
     GlucoseApp(
         email=email,

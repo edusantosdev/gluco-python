@@ -18,9 +18,13 @@ import os
 import sys
 from pathlib import Path
 
+# Allow `python scripts/phase0_probe.py` — repo root must be on sys.path.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from dotenv import load_dotenv
 from pylibrelinkup import (
-    APIUrl,
     AuthenticationError,
     LLUAPIRateLimitError,
     PrivacyPolicyError,
@@ -28,14 +32,7 @@ from pylibrelinkup import (
     TermsOfUseError,
 )
 
-
-def resolve_region(name: str) -> APIUrl:
-    name = name.upper()
-    try:
-        return APIUrl[name]
-    except KeyError:
-        valid = ", ".join(m.name for m in APIUrl)
-        raise SystemExit(f"Unknown region '{name}'. Valid values: {valid}")
+from glucose_common.regions import resolve_librelinkup_region
 
 
 def main() -> int:
@@ -57,8 +54,10 @@ def main() -> int:
             "Copy .env.example to .env and fill it in."
         )
 
-    region = resolve_region(args.region)
+    region, region_hint = resolve_librelinkup_region(args.region)
     print(f"Region: {region.name} ({region.value})", file=sys.stderr)
+    if region_hint:
+        print(f"Note: {region_hint}", file=sys.stderr)
 
     client = PyLibreLinkUp(email=email, password=password, api_url=region)
     try:
