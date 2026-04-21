@@ -15,9 +15,17 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import rumps
+from AppKit import (
+    NSAttributedString,
+    NSColor,
+    NSFont,
+    NSFontAttributeName,
+    NSForegroundColorAttributeName,
+)
 from dotenv import load_dotenv
 from pylibrelinkup import (
     APIUrl,
@@ -30,6 +38,7 @@ from pylibrelinkup import (
 
 from glucose_common.regions import resolve_librelinkup_region
 from glucose_common.trend import trend_symbol
+from glucose_common.units import glucose_unit_label
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,6 +56,31 @@ GLYPH_NET = "⚠ net"
 GLYPH_UNKNOWN = "⚠"
 
 
+@dataclass(frozen=True)
+class ColorThresholds:
+    low: float
+    high: float
+    very_high: float
+
+    @classmethod
+    def from_env(cls) -> ColorThresholds:
+        return cls(
+            low=float(os.environ.get("THRESHOLD_LOW_MG_DL", "70")),
+            high=float(os.environ.get("THRESHOLD_HIGH_MG_DL", "180")),
+            very_high=float(os.environ.get("THRESHOLD_VERY_HIGH_MG_DL", "250")),
+        )
+
+
+def _color_for(value_mg_dl: float, t: ColorThresholds):
+    if value_mg_dl < t.low:
+        return NSColor.systemRedColor()
+    if value_mg_dl > t.very_high:
+        return NSColor.systemOrangeColor()
+    if value_mg_dl > t.high:
+        return NSColor.systemYellowColor()
+    return NSColor.systemGreenColor()
+
+
 class GlucoseApp(rumps.App):
     """Menubar app that polls LibreLinkUp on a timer.
 
@@ -56,9 +90,17 @@ class GlucoseApp(rumps.App):
     and the daemon split in Phase 2 makes the point moot anyway.
     """
 
-    def __init__(self, email: str, password: str, region: APIUrl, poll_interval: int):
+    def __init__(
+        self,
+        email: str,
+        password: str,
+        region: APIUrl,
+        poll_interval: int,
+        thresholds: ColorThresholds,
+    ):
         super().__init__(GLYPH_STARTING, quit_button="Quit")
         self.poll_interval = poll_interval
+        self.thresholds = thresholds
 
         self._last_updated_item = rumps.MenuItem("Last updated: never")
         self._status_item = rumps.MenuItem("Status: starting…")
@@ -152,8 +194,13 @@ class GlucoseApp(rumps.App):
             value = int(round(reading.value))
         except (TypeError, ValueError):
             value = reading.value
-        self.title = f"{value} {trend_symbol(reading.trend)}".strip()
-        self._status_item.title = f"Status: ok ({reading.glucose_units})"
+        title = f"{value} {trend_symbol(reading.trend)}".strip()
+        value_for_color = getattr(reading, "value_in_mg_per_dl", None)
+        color = None
+        if value_for_color is not None:
+            color = _color_for(float(value_for_color), self.thresholds)
+        self._set_title(title, color=color)
+        self._status_item.title = f"Status: ok ({glucose_unit_label(reading.glucose_units)})"
         self._last_updated_item.title = (
             f"Last updated: {reading.timestamp.strftime('%H:%M')}"
         )
@@ -164,8 +211,29 @@ class GlucoseApp(rumps.App):
 
     # --- UI helpers ---
 
+    def _set_title(self, text: str, color=None) -> None:
+        nsapp = getattr(self, "_nsapp", None)
+        if nsapp is None or not hasattr(nsapp, "nsstatusitem"):
+            self.title = text
+            return
+        button = nsapp.nsstatusitem.button()
+        if button is None:
+            self.title = text
+            return
+        if color is None:
+            color = NSColor.labelColor()
+        attrs = {
+            NSForegroundColorAttributeName: color,
+            NSFontAttributeName: NSFont.menuBarFontOfSize_(0),
+        }
+        try:
+            attr_string = NSAttributedString.alloc().initWithString_attributes_(text, attrs)
+            button.setAttributedTitle_(attr_string)
+        except Exception:  # noqa: BLE001
+            self.title = text
+
     def _set_error(self, glyph: str, status_line: str) -> None:
-        self.title = glyph
+        self._set_title(glyph)
         self._status_item.title = f"Status: {status_line}"
 
 
@@ -185,15 +253,28 @@ def main() -> int:
     region_raw = os.environ.get("LIBRELINKUP_REGION", "US")
     region, region_hint = resolve_librelinkup_region(region_raw)
     poll_interval = int(os.environ.get("POLL_INTERVAL_SECONDS", "60"))
+    thresholds = ColorThresholds.from_env()
 
     if region_hint:
         log.info("%s", region_hint)
-    log.info("Starting MVP (region=%s, poll=%ss)", region.name, poll_interval)
+    log.info(
+        "Starting MVP (region=%s, poll=%ss, thresholds: <%g red, %g–%g green, "
+        "%g–%g yellow, >%g orange)",
+        region.name,
+        poll_interval,
+        thresholds.low,
+        thresholds.low,
+        thresholds.high,
+        thresholds.high,
+        thresholds.very_high,
+        thresholds.very_high,
+    )
     GlucoseApp(
         email=email,
         password=password,
         region=region,
         poll_interval=poll_interval,
+        thresholds=thresholds,
     ).run()
     return 0
 

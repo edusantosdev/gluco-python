@@ -56,6 +56,18 @@ HTTP consumer of it. Two terminals:
 .venv/bin/python -m macos_frontend
 ```
 
+Single-command convenience (run both from one terminal):
+
+```bash
+.venv/bin/python -m daemon & .venv/bin/python -m macos_frontend
+```
+
+If you want `Ctrl+C` to also stop the background daemon:
+
+```bash
+(.venv/bin/python -m daemon &) ; DAEMON_PID=$! ; .venv/bin/python -m macos_frontend ; kill $DAEMON_PID 2>/dev/null
+```
+
 Probe the daemon by hand:
 
 ```bash
@@ -112,6 +124,26 @@ All settings come from `.env` (or environment variables). The full set:
 | `LOG_LEVEL`               | `INFO`               | `DEBUG` for verbose                          |
 | `DAEMON_URL` (frontend)   | `http://127.0.0.1:8765` |                                          |
 | `FRONTEND_POLL_SECONDS`   | `30`                 | how often the menubar refreshes from daemon  |
+| `THRESHOLD_LOW_MG_DL`     | `70`                 | menubar text turns red below this            |
+| `THRESHOLD_HIGH_MG_DL`    | `180`                | turns yellow above this                      |
+| `THRESHOLD_VERY_HIGH_MG_DL` | `250`              | turns orange above this                      |
+
+### Menubar colour scheme
+
+The numeric value in the menubar is colour-coded by `value_in_mg_per_dl`
+(so mmol/L users still get correct colours):
+
+| Range (mg/dL)         | Colour | Meaning      |
+|-----------------------|--------|--------------|
+| `< 70`                | red    | hypo         |
+| `70 – 180`            | green  | in range     |
+| `> 180 – 250`         | yellow | high         |
+| `> 250`               | orange | very high    |
+
+Boundary values (exactly 70, 180, 250) sit on the *lower-severity* side —
+e.g. 70 is green, 250 is yellow — so you don't get nagged for being on
+the edge of a target. Override via the env vars above. Error glyphs
+(`⚠ auth`, `⚠ net`, etc.) use the system default text colour.
 
 ## What it deliberately does not do (yet)
 

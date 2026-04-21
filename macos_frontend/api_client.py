@@ -24,6 +24,7 @@ class DaemonError(RuntimeError):
 class CurrentReading:
     status: str
     value: float | None
+    value_in_mg_per_dl: float | None
     trend_symbol: str | None
     unit: str | None
     sensor_timestamp: str | None
@@ -36,6 +37,7 @@ class CurrentReading:
         return cls(
             status=data.get("status", "unknown"),
             value=data.get("value"),
+            value_in_mg_per_dl=data.get("value_in_mg_per_dl"),
             trend_symbol=data.get("trend_symbol"),
             unit=data.get("unit"),
             sensor_timestamp=data.get("sensor_timestamp"),
@@ -61,6 +63,7 @@ class DaemonClient:
             return CurrentReading(
                 status="starting",
                 value=None,
+                value_in_mg_per_dl=None,
                 trend_symbol=None,
                 unit=None,
                 sensor_timestamp=None,
