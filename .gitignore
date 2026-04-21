@@ -1,0 +1,28 @@
+# Secrets
+.env
+
+# Virtual envs / toolchains
+.venv/
+.tools/
+venv/
+env/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local daemon state (Phase 3)
+.glucose-display/
