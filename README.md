@@ -1,0 +1,1 @@
+# librelinkup-glucose-menubar-python
