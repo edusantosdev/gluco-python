@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Glucose daemon LaunchAgent.
+
+  Installed to ~/Library/LaunchAgents/com.glucose-display.daemon.plist via
+  scripts/install_launchagent.sh. Placeholders __…__ are substituted at
+  install time so the plist is self-contained and doesn't rely on $PATH.
+
+  Key choices:
+    - RunAtLoad + KeepAlive=true: start on login and restart on crash.
+    - ThrottleInterval=10: min 10s between respawns, so a config error
+      won't burn a CPU core while we debug.
+    - WorkingDirectory set to the repo so relative paths (.env, state
+      dir override if any) resolve predictably.
+    - Standard streams land in the state dir — launchd's own logs are
+      noisy and hard to find; this keeps everything in one place.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.glucose-display.daemon</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__VENV_PYTHON__</string>
+        <string>-m</string>
+        <string>daemon</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO_ROOT__</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>DAEMON_STATE_DIR</key>
+        <string>__STATE_DIR__</string>
+        <!--
+          PYTHONUNBUFFERED keeps log lines ordered in the stdout file
+          (Python otherwise buffers stdout when not a TTY, which makes
+          a crashed daemon look silent until the buffer was due to
+          flush).
+        -->
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>__STATE_DIR__/launchd.daemon.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__STATE_DIR__/launchd.daemon.err.log</string>
+
+    <!--
+      ProcessType=Background hints to macOS that this is long-running
+      and not user-interactive, so App Nap and other aggressive energy
+      policies don't throttle the poller loop.
+    -->
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

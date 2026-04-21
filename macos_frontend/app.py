@@ -33,12 +33,17 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from glucose_common.credentials import (  # noqa: E402
+    KEYCHAIN_SERVICE,
+    save_credentials,
+)
 from macos_frontend.api_client import (  # noqa: E402
     CurrentReading,
     DaemonClient,
     DaemonError,
     DaemonUnreachable,
 )
+from macos_frontend.notifier import NotificationPolicy, Notifier  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -177,21 +182,42 @@ _DETAIL_TEXT = {
 
 
 class GlucoseApp(rumps.App):
-    def __init__(self, base_url: str, poll_interval: int, thresholds: ColorThresholds):
+    def __init__(
+        self,
+        base_url: str,
+        poll_interval: int,
+        thresholds: ColorThresholds,
+        notifier: Notifier | None = None,
+    ):
         super().__init__("···", quit_button="Quit")
         self.poll_interval = poll_interval
         self.thresholds = thresholds
+        self._notifier = notifier
 
         self._status_item = rumps.MenuItem("Status: starting…")
         self._sensor_item = rumps.MenuItem("Sensor: —")
         self._refresh_item = rumps.MenuItem("Refresh now", callback=self._on_refresh)
         self._reauth_item = rumps.MenuItem("Force re-authenticate", callback=self._on_reauth)
+        self._notifs_item = rumps.MenuItem(
+            "Notifications", callback=self._on_toggle_notifications
+        )
+        self._notifs_item.state = 1 if (notifier and notifier.enabled) else 0
+        self._creds_item = rumps.MenuItem(
+            "Update credentials…", callback=self._on_edit_credentials
+        )
+        self._thresholds_item = rumps.MenuItem(
+            "Set thresholds…", callback=self._on_edit_thresholds
+        )
         self.menu = [
             self._status_item,
             self._sensor_item,
             None,
             self._refresh_item,
             self._reauth_item,
+            None,
+            self._notifs_item,
+            self._creds_item,
+            self._thresholds_item,
         ]
 
         self._client = DaemonClient(base_url=base_url)
@@ -268,6 +294,13 @@ class GlucoseApp(rumps.App):
         self._status_item.title = _format_status_line(reading)
         self._sensor_item.title = _format_detail_line(reading)
 
+        if self._notifier is not None:
+            self._notifier.handle(
+                value_mg_dl=reading.value_in_mg_per_dl,
+                reading_age_seconds=reading.reading_age_seconds,
+                status=reading.status,
+            )
+
     def _on_refresh(self, _sender) -> None:
         log.info("Manual refresh")
         self._on_tick(None)
@@ -280,17 +313,144 @@ class GlucoseApp(rumps.App):
             log.warning("Re-auth failed: %s", e)
         self._on_tick(None)
 
+    # --- Preferences ---
+
+    def _on_toggle_notifications(self, sender) -> None:
+        if self._notifier is None:
+            rumps.alert(
+                title="Notifications unavailable",
+                message="Notifier was not initialised. Restart the frontend.",
+            )
+            return
+        self._notifier.enabled = not self._notifier.enabled
+        sender.state = 1 if self._notifier.enabled else 0
+        log.info(
+            "Notifications %s", "enabled" if self._notifier.enabled else "disabled"
+        )
+
+    def _on_edit_credentials(self, _sender) -> None:
+        """Capture email + password with two prompts and save to Keychain.
+
+        rumps has no native multi-field form. Two consecutive Windows is
+        a bit crude but lets us use ``secure=True`` on the password one,
+        which matters more than having everything on one screen."""
+        email_window = rumps.Window(
+            title="LibreLinkUp email",
+            message="Enter the email associated with your LibreLinkUp account.",
+            default_text="",
+            ok="Next",
+            cancel="Cancel",
+            dimensions=(320, 22),
+        )
+        result = email_window.run()
+        if not result.clicked or not result.text.strip():
+            return
+        email = result.text.strip()
+
+        pw_window = rumps.Window(
+            title="LibreLinkUp password",
+            message="Password is stored in the macOS Keychain, not on disk.",
+            default_text="",
+            ok="Save",
+            cancel="Cancel",
+            dimensions=(320, 22),
+        )
+        # rumps doesn't expose secure text entry directly; the NSSecureTextField
+        # attribute is set by passing ``secure=True`` in newer versions. Older
+        # rumps ignores unknown kwargs, so this degrades gracefully.
+        try:
+            pw_window.secure = True  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001
+            pass
+        pw_result = pw_window.run()
+        if not pw_result.clicked or not pw_result.text:
+            return
+        try:
+            save_credentials(email=email, password=pw_result.text)
+        except Exception as e:  # noqa: BLE001
+            rumps.alert(
+                title="Could not save credentials",
+                message=f"{e}\n\nYou can still set LIBRELINKUP_EMAIL/_PASSWORD in .env.",
+            )
+            return
+        rumps.alert(
+            title="Credentials saved",
+            message=(
+                f"Stored under Keychain service '{KEYCHAIN_SERVICE}'. "
+                "Click 'Force re-authenticate' to use them now."
+            ),
+        )
+
+    def _on_edit_thresholds(self, _sender) -> None:
+        """Prompt for the three colour thresholds. Session-only; see below."""
+        window = rumps.Window(
+            title="Glucose thresholds (mg/dL)",
+            message=(
+                "Three numbers separated by commas: low, high, very_high.\n"
+                "Current: "
+                f"{int(self.thresholds.low)}, "
+                f"{int(self.thresholds.high)}, "
+                f"{int(self.thresholds.very_high)}.\n\n"
+                "To persist across restarts, set THRESHOLD_LOW_MG_DL, "
+                "THRESHOLD_HIGH_MG_DL, THRESHOLD_VERY_HIGH_MG_DL in .env."
+            ),
+            default_text=(
+                f"{int(self.thresholds.low)},"
+                f"{int(self.thresholds.high)},"
+                f"{int(self.thresholds.very_high)}"
+            ),
+            ok="Apply",
+            cancel="Cancel",
+            dimensions=(320, 22),
+        )
+        result = window.run()
+        if not result.clicked:
+            return
+        try:
+            parts = [float(x.strip()) for x in result.text.split(",")]
+            if len(parts) != 3:
+                raise ValueError("expected three numbers")
+            low, high, very_high = parts
+            if not (low < high < very_high):
+                raise ValueError("must satisfy low < high < very_high")
+        except Exception as e:  # noqa: BLE001
+            rumps.alert(title="Invalid thresholds", message=str(e))
+            return
+
+        self.thresholds = ColorThresholds(low=low, high=high, very_high=very_high)
+        if self._notifier is not None:
+            self._notifier.policy.low = low
+            self._notifier.policy.high = high
+            self._notifier.policy.very_high = very_high
+        self._on_tick(None)
+
+
+def _build_notifier(thresholds: ColorThresholds) -> Notifier:
+    stale_after = int(os.environ.get("NOTIFY_STALE_AFTER_SECONDS", str(10 * 60)))
+    cooldown = int(os.environ.get("NOTIFY_COOLDOWN_SECONDS", str(15 * 60)))
+    enabled = os.environ.get("NOTIFY_ENABLED", "1") not in ("0", "false", "False", "")
+    policy = NotificationPolicy(
+        low=thresholds.low,
+        high=thresholds.high,
+        very_high=thresholds.very_high,
+        cooldown_seconds=cooldown,
+        stale_after_seconds=stale_after,
+    )
+    return Notifier(policy, enabled=enabled)
+
 
 def main() -> int:
     load_dotenv(_REPO_ROOT / ".env")
     base_url = os.environ.get("DAEMON_URL", "http://127.0.0.1:8765")
     poll_interval = int(os.environ.get("FRONTEND_POLL_SECONDS", "30"))
     thresholds = ColorThresholds.from_env()
+    notifier = _build_notifier(thresholds)
     log.info(
-        "Starting frontend (daemon=%s, poll=%ss, thresholds: <%g red, %g–%g green, "
-        "%g–%g yellow, >%g orange)",
+        "Starting frontend (daemon=%s, poll=%ss, notifications=%s, "
+        "thresholds: <%g red, %g–%g green, %g–%g yellow, >%g orange)",
         base_url,
         poll_interval,
+        "on" if notifier.enabled else "off",
         thresholds.low,
         thresholds.low,
         thresholds.high,
@@ -302,6 +462,7 @@ def main() -> int:
         base_url=base_url,
         poll_interval=poll_interval,
         thresholds=thresholds,
+        notifier=notifier,
     ).run()
     return 0
 

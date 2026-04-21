@@ -31,7 +31,7 @@ from glucose_common.trend import trend_name, trend_symbol  # noqa: E402
 from glucose_common.units import glucose_unit_label  # noqa: E402
 
 from .backoff import ExponentialBackoff  # noqa: E402
-from .config import Settings, load_settings  # noqa: E402
+from .config import MissingCredentialsError, Settings, load_settings  # noqa: E402
 from .logging_setup import configure_logging  # noqa: E402
 from .models import (  # noqa: E402
     CurrentResponse,
@@ -51,6 +51,9 @@ def _build_service(settings: Settings) -> GlucoseService:
     region, region_hint = resolve_librelinkup_region(settings.librelinkup_region)
     if region_hint:
         log.info("%s", region_hint)
+    log.info("Credentials loaded from %s", settings.credentials_source)
+    # Safe by construction: ``load_settings`` raises if creds are missing.
+    assert settings.librelinkup_email and settings.librelinkup_password
     return GlucoseService(
         email=settings.librelinkup_email,
         password=settings.librelinkup_password.get_secret_value(),
@@ -73,7 +76,13 @@ def _build_service(settings: Settings) -> GlucoseService:
 # lock is acquired here, not in lifespan, because by the time lifespan runs
 # uvicorn has already bound the listening socket — and we want to bail out
 # *before* that to keep error messages clean.
-_settings = load_settings()
+try:
+    _settings = load_settings()
+except MissingCredentialsError as _e:
+    # Print to stderr + exit 78 (EX_CONFIG) so launchd logs stay readable
+    # and ``launchctl print`` shows a distinct config-error exit code.
+    print(f"glucose-daemon: {_e}", file=sys.stderr)
+    sys.exit(78)
 configure_logging(_settings.log_level, _settings.log_path)
 acquire_lock(_settings.lock_path)
 _service = _build_service(_settings)

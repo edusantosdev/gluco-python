@@ -3,14 +3,30 @@
 Reads from environment variables (and ``.env`` if present). Centralizing
 config here means everything else in the daemon can ask for ``settings.X``
 without doing its own env parsing.
+
+Credentials note (Phase 4)
+--------------------------
+Email + password may come from either the macOS Keychain (via
+``glucose_common.credentials``) or from ``.env``. To keep the same code
+path across dev and production, we let pydantic ingest env vars freely
+and then reconcile with Keychain in ``load_settings()`` — the resulting
+``Settings`` always has a concrete email/password, whichever source they
+came from.
 """
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from glucose_common.credentials import load_credentials  # noqa: E402
 
 
 def _default_state_dir() -> Path:
@@ -25,9 +41,15 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    librelinkup_email: str = Field(..., alias="LIBRELINKUP_EMAIL")
-    librelinkup_password: SecretStr = Field(..., alias="LIBRELINKUP_PASSWORD")
+    # Optional at the pydantic layer so a Keychain-only install can boot
+    # without either variable being set. ``load_settings()`` fills them
+    # before returning, and fails loudly if neither source has them.
+    librelinkup_email: str | None = Field(default=None, alias="LIBRELINKUP_EMAIL")
+    librelinkup_password: SecretStr | None = Field(default=None, alias="LIBRELINKUP_PASSWORD")
     librelinkup_region: str = Field(default="US", alias="LIBRELINKUP_REGION")
+
+    # Reported back in logs so users can tell whether Keychain is active.
+    credentials_source: str = Field(default="env")
 
     poll_interval_seconds: int = Field(default=60, alias="POLL_INTERVAL_SECONDS")
 
@@ -75,8 +97,31 @@ class Settings(BaseSettings):
         return self.state_dir / "daemon.log"
 
 
+class MissingCredentialsError(RuntimeError):
+    """Neither Keychain nor env supplied a full email+password pair."""
+
+
 def load_settings() -> Settings:
-    """Instantiate ``Settings``. Kept as a function so tests can override env."""
-    s = Settings()  # type: ignore[call-arg]  # pulled from env at runtime
+    """Instantiate ``Settings`` and reconcile credentials with Keychain.
+
+    Kept as a function so tests can monkeypatch ``load_credentials`` and
+    the environment independently."""
+    s = Settings()  # type: ignore[call-arg]  — pulled from env at runtime
+
+    env_email = s.librelinkup_email
+    env_password = s.librelinkup_password.get_secret_value() if s.librelinkup_password else None
+    resolved = load_credentials(env_email=env_email, env_password=env_password)
+
+    if resolved is None:
+        raise MissingCredentialsError(
+            "No LibreLinkUp credentials found. "
+            "Either run `python scripts/set_credentials.py` to store them in "
+            "macOS Keychain, or set LIBRELINKUP_EMAIL/LIBRELINKUP_PASSWORD in .env."
+        )
+
+    s.librelinkup_email = resolved.email
+    s.librelinkup_password = SecretStr(resolved.password)
+    s.credentials_source = resolved.source
+
     s.state_dir.mkdir(parents=True, exist_ok=True)
     return s

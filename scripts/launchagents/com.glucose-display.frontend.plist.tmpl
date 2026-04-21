@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Glucose menubar frontend LaunchAgent.
+
+  Separate agent from the daemon so a frontend crash doesn't kill
+  polling (you keep collecting data to catch up on when the menubar
+  relaunches). rumps needs a GUI session; ProcessType=Interactive +
+  LimitLoadToSessionType=Aqua makes launchd load this only in a real
+  login session, not in loginwindow or an SSH session.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.glucose-display.frontend</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__VENV_PYTHON__</string>
+        <string>-m</string>
+        <string>macos_frontend</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO_ROOT__</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>__STATE_DIR__/launchd.frontend.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__STATE_DIR__/launchd.frontend.err.log</string>
+
+    <key>ProcessType</key>
+    <string>Interactive</string>
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
+</dict>
+</plist>
