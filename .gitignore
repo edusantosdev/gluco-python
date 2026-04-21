@@ -24,5 +24,6 @@ htmlcov/
 .vscode/
 *.swp
 
-# Local daemon state (Phase 3)
+# Local daemon state (Phase 2 lockfile, Phase 3 session+logs)
 .glucose-display/
+/tmp/glucose_daemon.log
