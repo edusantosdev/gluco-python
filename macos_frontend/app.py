@@ -107,15 +107,14 @@ def _osascript_dialog(
     ]
     if hidden_answer:
         parts.append("with hidden answer")
-    # ``tell application "System Events"`` is what makes the dialog
-    # reliably appear in front regardless of our own app-activation
-    # state, which is exactly the problem we can't solve for unbundled
-    # Python.
-    script = (
-        'tell application "System Events"\nactivate\n'
-        + " ".join(parts)
-        + "\nend tell"
-    )
+    # Run ``display dialog`` directly (no ``tell application "System Events"``
+    # wrapper). The SE wrapper isn't needed here — osascript itself is a
+    # proper bundled helper — and empirically it can interfere with the
+    # second invocation from the same process (the hidden-answer password
+    # prompt never appears). Using ``tell me to activate`` brings
+    # osascript's own dialog to the front.
+    script = "tell me to activate\n" + " ".join(parts)
+    log.info("osascript dialog: title=%r hidden=%s", title, hidden_answer)
     proc = subprocess.run(
         ["/usr/bin/osascript", "-e", script],
         capture_output=True,
@@ -126,8 +125,10 @@ def _osascript_dialog(
         stderr = (proc.stderr or "").strip()
         # Exit 1 + "-128" = user hit Cancel / closed the dialog.
         if "-128" in stderr or "User canceled" in stderr:
+            log.info("osascript dialog %r: cancelled", title)
             return False, ""
-        log.warning("osascript dialog failed: %s", stderr)
+        log.warning("osascript dialog %r failed (rc=%s): %s",
+                    title, proc.returncode, stderr)
         return False, ""
     out = (proc.stdout or "").strip()
     # Format: "button returned:<ok>, text returned:<value>".
@@ -135,16 +136,16 @@ def _osascript_dialog(
     marker = "text returned:"
     if marker in out:
         text = out[out.index(marker) + len(marker):].strip()
+    log.info("osascript dialog %r: ok, text_len=%d", title, len(text))
     return True, text
 
 
 def _osascript_alert(*, title: str, message: str) -> None:
     """Show a one-button informational alert. Errors are logged, not raised."""
     script = (
-        'tell application "System Events"\nactivate\n'
+        "tell me to activate\n"
         f'display alert "{_applescript_escape(title)}" '
-        f'message "{_applescript_escape(message)}"\n'
-        "end tell"
+        f'message "{_applescript_escape(message)}"'
     )
     try:
         subprocess.run(
@@ -468,6 +469,10 @@ class GlucoseApp(rumps.App):
             return
         email = email.strip()
         if not email:
+            _osascript_alert(
+                title="Email Required",
+                message="You didn't enter an email. Try Update Credentials… again.",
+            )
             return
 
         ok, password = _osascript_dialog(
@@ -476,7 +481,13 @@ class GlucoseApp(rumps.App):
             ok="Save",
             hidden_answer=True,
         )
-        if not ok or not password:
+        if not ok:
+            return
+        if not password:
+            _osascript_alert(
+                title="Password Required",
+                message="You didn't enter a password. Try Update Credentials… again.",
+            )
             return
 
         try:
