@@ -20,13 +20,17 @@ Design goals
   after ``stale_after_seconds`` is more useful than silence.
 
 The ``NotificationPolicy`` class is pure: feed it readings, get back a
-list of notifications to emit. The ``Notifier`` wrapper handles the
-actual Cocoa ``NSUserNotification`` delivery via ``rumps``.
+list of notifications to emit. The ``Notifier`` wrapper delivers them via
+``MacOSNotificationBackend``: try ``rumps`` first (nice when bundled with a
+proper ``Info.plist``), then fall back to ``osascript display notification``
+so LaunchAgent / bare ``python -m macos_frontend`` still alerts without
+hacking an ``Info.plist`` next to the venv interpreter.
 """
 
 from __future__ import annotations
 
 import logging
+import subprocess
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -209,20 +213,66 @@ class NotificationBackend(Protocol):
     def notify(self, *, title: str, subtitle: str | None, message: str) -> None: ...
 
 
-class RumpsNotificationBackend:
-    """Delivers notifications via rumps' ``NSUserNotification`` wrapper.
+def _applescript_escape(s: str) -> str:
+    """Escape a string for use inside AppleScript double-quoted text."""
+    return s.replace("\\", "\\\\").replace('"', '\\"')
 
-    rumps raises ``RuntimeError`` if the process isn't a proper bundled
-    app on some macOS versions. We catch and log rather than crash the
-    menubar tick — notifications are best-effort, not load-bearing."""
+
+def _notify_via_applescript(
+    *, title: str, subtitle: str | None, message: str
+) -> None:
+    """``osascript`` path — works without ``CFBundleIdentifier`` (LaunchAgent)."""
+    body = _applescript_escape(message)
+    t = _applescript_escape(title)
+    if subtitle:
+        sub = _applescript_escape(subtitle)
+        script = (
+            f'display notification "{body}" with title "{t}" subtitle "{sub}"'
+        )
+    else:
+        script = f'display notification "{body}" with title "{t}"'
+    proc = subprocess.run(
+        ["/usr/bin/osascript", "-e", script],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or "").strip()
+        raise RuntimeError(err or f"osascript exited {proc.returncode}")
+
+
+class MacOSNotificationBackend:
+    """Try rumps (rich Notification Center integration), then AppleScript.
+
+    Unbundled Python processes started by launchd lack an ``Info.plist`` with
+    ``CFBundleIdentifier``, which ``rumps.notification`` requires. The
+    ``osascript`` fallback uses the same user-visible banners without
+    installing anything beside ``.venv/bin/python``."""
 
     def notify(self, *, title: str, subtitle: str | None, message: str) -> None:
+        err_rumps: Exception | None = None
         try:
             import rumps  # imported lazily so tests don't need AppKit
 
             rumps.notification(title=title, subtitle=subtitle or "", message=message)
+            return
         except Exception as e:  # noqa: BLE001
-            log.warning("Could not deliver notification (%s): %s", title, e)
+            err_rumps = e
+            log.debug("rumps notification unavailable, trying osascript: %s", e)
+        try:
+            _notify_via_applescript(title=title, subtitle=subtitle, message=message)
+        except Exception as e2:  # noqa: BLE001
+            log.warning(
+                "Could not deliver notification (%s): rumps=%s; osascript=%s",
+                title,
+                err_rumps,
+                e2,
+            )
+
+
+# Backward compatibility — older code referred to this name.
+RumpsNotificationBackend = MacOSNotificationBackend
 
 
 class Notifier:
@@ -237,7 +287,7 @@ class Notifier:
     ) -> None:
         self.policy = policy
         self.enabled = enabled
-        self._backend = backend or RumpsNotificationBackend()
+        self._backend = backend or MacOSNotificationBackend()
 
     def handle(
         self,

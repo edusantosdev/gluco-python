@@ -47,6 +47,10 @@ cmd_install() {
         echo "  python3 -m venv .venv && .venv/bin/pip install -e ." >&2
         exit 1
     fi
+    echo >&2 "Note: stop any manually started daemon first (terminal:"
+    echo >&2 "  .venv/bin/python -m daemon"
+    echo >&2 "Only one process may hold ${STATE_DIR}/daemon.lock — otherwise"
+    echo >&2 "this LaunchAgent will fail with 'Another glucose daemon is already running'."
     mkdir -p "${LA_DIR}" "${STATE_DIR}"
 
     render_plist "${DAEMON_TMPL}" "${DAEMON_PLIST}"

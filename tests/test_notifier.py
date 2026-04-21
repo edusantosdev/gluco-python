@@ -7,6 +7,7 @@ from macos_frontend.notifier import (
     NotificationPolicy,
     Notifier,
     Zone,
+    _applescript_escape,
 )
 
 
@@ -184,3 +185,10 @@ def test_zone_enum_roundtrip() -> None:
     """Zone is used as a dict key; guard against accidentally breaking that."""
     d = {Zone.LOW: 1, Zone.HIGH: 2}
     assert d[Zone.LOW] == 1 and d[Zone.HIGH] == 2
+
+
+def test_applescript_escape_quotes_and_backslashes() -> None:
+    assert _applescript_escape('a') == "a"
+    assert _applescript_escape('a"b') == 'a\\"b'
+    assert _applescript_escape("a\\b") == "a\\\\b"
+    assert _applescript_escape('say "hi"') == 'say \\"hi\\"'

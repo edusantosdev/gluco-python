@@ -20,6 +20,7 @@ from pathlib import Path
 
 import rumps
 from AppKit import (
+    NSApplication,
     NSAttributedString,
     NSColor,
     NSFont,
@@ -27,6 +28,7 @@ from AppKit import (
     NSForegroundColorAttributeName,
 )
 from dotenv import load_dotenv
+from PyObjCTools import AppHelper
 
 # Allow ``python -m macos_frontend`` and ``python macos_frontend/app.py``.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -50,6 +52,27 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 log = logging.getLogger("glucose.frontend")
+
+# Showing ``NSAlert.runModal()`` / ``rumps.Window.run()`` *synchronously* from a
+# status-item menu callback leaves the menu stuck disabled on some macOS
+# versions — the menu never finishes its teardown. Defer modals slightly so
+# the tracking session completes first.
+#
+# Menu-only (LSUIElement) apps also need activation before ``runModal`` or the
+# sheet may not appear and the menu session can stay wedged.
+_MENU_MODAL_DELAY_SEC = 0.25
+
+
+def _activate_for_modal() -> None:
+    NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+
+
+def _defer_modal(fn) -> None:
+    def _run() -> None:
+        _activate_for_modal()
+        fn()
+
+    AppHelper.callLater(_MENU_MODAL_DELAY_SEC, _run)
 
 
 # Map daemon Status values to a single-character / short-text menubar title
@@ -116,37 +139,38 @@ def _color_for(value_mg_dl: float, t: ColorThresholds):
     return NSColor.systemGreenColor()
 
 
-def _format_status_line(reading: CurrentReading) -> str:
+def _reading_menu_labels(reading: CurrentReading) -> tuple[str, str]:
+    """Two menu rows: freshness (with sample clock in parens) and display units."""
     if reading.status in ("ok", "stale"):
-        return f"Updated: {_humanize_age(reading.reading_age_seconds)}"
-    return _STATUS_TEXT.get(reading.status, "Status: unavailable")
-
-
-def _format_detail_line(reading: CurrentReading) -> str:
-    local_hhmm = _to_local_hhmm(reading.sensor_timestamp)
-    unit = reading.unit or ""
-    if local_hhmm != "—":
-        if unit:
-            return f"Last reading: {local_hhmm} ({unit})"
-        return f"Last reading: {local_hhmm}"
-    if reading.status in ("ok", "stale"):
-        return "Last reading: —"
-    return _DETAIL_TEXT.get(reading.status, "Waiting for next update")
+        local_hhmm = _to_local_hhmm(reading.sensor_timestamp)
+        age = _humanize_age(reading.reading_age_seconds)
+        unit = reading.unit or ""
+        if local_hhmm != "—":
+            updated_line = f"Last Updated: {age} ({local_hhmm})"
+        else:
+            updated_line = f"Last Updated: {age}"
+        unit_line = f"Units: {unit}" if unit else "Units: —"
+        return (updated_line, unit_line)
+    status = _STATUS_TEXT.get(reading.status, "Status: Unavailable")
+    detail = _DETAIL_TEXT.get(reading.status, "")
+    if detail:
+        return (status, detail)
+    return (status, "—")
 
 
 def _humanize_age(age_seconds: int | None) -> str:
     if age_seconds is None:
-        return "unknown"
+        return "Unknown"
     if age_seconds < 0:
         # Clock skew or bad payload timestamp; avoid showing confusing negatives.
-        return "just now"
+        return "Just Now"
     if age_seconds < 60:
-        return "just now"
+        return "Just Now"
     minutes = age_seconds // 60
     if minutes < 60:
-        return "1 min ago" if minutes == 1 else f"{minutes} min ago"
+        return "1 Min Ago" if minutes == 1 else f"{minutes} Min Ago"
     hours = minutes // 60
-    return "1 hour ago" if hours == 1 else f"{hours} hours ago"
+    return "1 Hour Ago" if hours == 1 else f"{hours} Hours Ago"
 
 
 def _to_local_hhmm(timestamp_iso: str | None) -> str:
@@ -162,22 +186,22 @@ def _to_local_hhmm(timestamp_iso: str | None) -> str:
 
 _STATUS_TEXT = {
     "starting": "Connecting…",
-    "warming_up": "Sensor warming up",
-    "sensor_ended": "Sensor ended",
-    "no_network": "No internet connection",
-    "auth_failed": "Sign-in required",
-    "tos_required": "Open Libre app to accept terms",
-    "rate_limited": "Temporarily rate-limited",
+    "warming_up": "Sensor Warming Up",
+    "sensor_ended": "Sensor Ended",
+    "no_network": "No Internet Connection",
+    "auth_failed": "Sign-In Required",
+    "tos_required": "Open Libre App to Accept Terms",
+    "rate_limited": "Temporarily Rate-Limited",
 }
 
 _DETAIL_TEXT = {
-    "starting": "Getting first reading",
-    "warming_up": "Try again in a few minutes",
-    "sensor_ended": "Replace sensor in Libre app",
-    "no_network": "Check Wi-Fi and try Refresh now",
-    "auth_failed": "Use Force re-authenticate",
-    "tos_required": "Accept prompts in official Libre app",
-    "rate_limited": "Will retry automatically",
+    "starting": "Getting First Reading",
+    "warming_up": "Try Again in a Few Minutes",
+    "sensor_ended": "Replace Sensor in Libre App",
+    "no_network": "Check Wi-Fi and Try Refresh Now",
+    "auth_failed": "Use Force Re-Authenticate",
+    "tos_required": "Accept Prompts in Official Libre App",
+    "rate_limited": "Will Retry Automatically",
 }
 
 
@@ -194,23 +218,23 @@ class GlucoseApp(rumps.App):
         self.thresholds = thresholds
         self._notifier = notifier
 
-        self._status_item = rumps.MenuItem("Status: starting…")
-        self._sensor_item = rumps.MenuItem("Sensor: —")
-        self._refresh_item = rumps.MenuItem("Refresh now", callback=self._on_refresh)
-        self._reauth_item = rumps.MenuItem("Force re-authenticate", callback=self._on_reauth)
+        self._reading_updated_item = rumps.MenuItem("Connecting…")
+        self._reading_unit_item = rumps.MenuItem("—")
+        self._refresh_item = rumps.MenuItem("Refresh Now", callback=self._on_refresh)
+        self._reauth_item = rumps.MenuItem("Force Re-Authenticate", callback=self._on_reauth)
         self._notifs_item = rumps.MenuItem(
             "Notifications", callback=self._on_toggle_notifications
         )
         self._notifs_item.state = 1 if (notifier and notifier.enabled) else 0
         self._creds_item = rumps.MenuItem(
-            "Update credentials…", callback=self._on_edit_credentials
+            "Update Credentials…", callback=self._on_edit_credentials
         )
         self._thresholds_item = rumps.MenuItem(
-            "Set thresholds…", callback=self._on_edit_thresholds
+            "Set Thresholds…", callback=self._on_edit_thresholds
         )
         self.menu = [
-            self._status_item,
-            self._sensor_item,
+            self._reading_updated_item,
+            self._reading_unit_item,
             None,
             self._refresh_item,
             self._reauth_item,
@@ -271,14 +295,14 @@ class GlucoseApp(rumps.App):
         except DaemonUnreachable as e:
             log.warning("Daemon unreachable: %s", e)
             self._set_title("⚠ daemon")
-            self._status_item.title = "Background service is offline"
-            self._sensor_item.title = "Start daemon first"
+            self._reading_updated_item.title = "Background Service Offline"
+            self._reading_unit_item.title = "Start the Daemon"
             return
         except DaemonError as e:
             log.warning("Daemon error: %s", e)
             self._set_title("⚠ daemon")
-            self._status_item.title = "Background service error"
-            self._sensor_item.title = "Try Force re-authenticate"
+            self._reading_updated_item.title = "Background Service Error"
+            self._reading_unit_item.title = "Try Force Re-Authenticate"
             return
 
         title = _format_title(reading)
@@ -291,8 +315,9 @@ class GlucoseApp(rumps.App):
             color = _color_for(value_for_color, self.thresholds)
         self._set_title(title, color=color)
 
-        self._status_item.title = _format_status_line(reading)
-        self._sensor_item.title = _format_detail_line(reading)
+        u_line, units_line = _reading_menu_labels(reading)
+        self._reading_updated_item.title = u_line
+        self._reading_unit_item.title = units_line
 
         if self._notifier is not None:
             self._notifier.handle(
@@ -317,9 +342,11 @@ class GlucoseApp(rumps.App):
 
     def _on_toggle_notifications(self, sender) -> None:
         if self._notifier is None:
-            rumps.alert(
-                title="Notifications unavailable",
-                message="Notifier was not initialised. Restart the frontend.",
+            _defer_modal(
+                lambda: rumps.alert(
+                    title="Notifications unavailable",
+                    message="Notifier was not initialised. Restart the frontend.",
+                )
             )
             return
         self._notifier.enabled = not self._notifier.enabled
@@ -329,6 +356,9 @@ class GlucoseApp(rumps.App):
         )
 
     def _on_edit_credentials(self, _sender) -> None:
+        _defer_modal(self._edit_credentials_impl)
+
+    def _edit_credentials_impl(self) -> None:
         """Capture email + password with two prompts and save to Keychain.
 
         rumps has no native multi-field form. Two consecutive Windows is
@@ -368,20 +398,25 @@ class GlucoseApp(rumps.App):
         try:
             save_credentials(email=email, password=pw_result.text)
         except Exception as e:  # noqa: BLE001
+            _activate_for_modal()
             rumps.alert(
                 title="Could not save credentials",
                 message=f"{e}\n\nYou can still set LIBRELINKUP_EMAIL/_PASSWORD in .env.",
             )
             return
+        _activate_for_modal()
         rumps.alert(
             title="Credentials saved",
             message=(
                 f"Stored under Keychain service '{KEYCHAIN_SERVICE}'. "
-                "Click 'Force re-authenticate' to use them now."
+                "Click 'Force Re-Authenticate' to use them now."
             ),
         )
 
     def _on_edit_thresholds(self, _sender) -> None:
+        _defer_modal(self._edit_thresholds_impl)
+
+    def _edit_thresholds_impl(self) -> None:
         """Prompt for the three colour thresholds. Session-only; see below."""
         window = rumps.Window(
             title="Glucose thresholds (mg/dL)",
@@ -414,6 +449,7 @@ class GlucoseApp(rumps.App):
             if not (low < high < very_high):
                 raise ValueError("must satisfy low < high < very_high")
         except Exception as e:  # noqa: BLE001
+            _activate_for_modal()
             rumps.alert(title="Invalid thresholds", message=str(e))
             return
 
