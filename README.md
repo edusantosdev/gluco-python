@@ -6,7 +6,7 @@ Personal macOS menubar glucose display for LibreLinkUp.
 - `macos_frontend` is a menubar app (`rumps`) that reads from the daemon.
 - credentials are loaded from macOS Keychain first, then `.env`.
 
-For design details, see [`glucose-menubar-implementation-plan.md`](./glucose-menubar-implementation-plan.md).
+For design details, see `[glucose-menubar-implementation-plan.md](./glucose-menubar-implementation-plan.md)`.
 
 ## Requirements
 
@@ -75,21 +75,23 @@ curl -s -X POST http://127.0.0.1:8765/auth/refresh | jq
 
 ## Menubar Status Titles
 
-| Status | Title |
-|---|---|
-| `ok` | `124 →` |
-| `stale` | `124 →*` |
-| `starting` | `Starting…` |
-| `warming_up` | `Warming Up` |
-| `sensor_ended` | `⚠ Sensor Ended` |
-| `no_network` | `⚠ Offline` |
-| `auth_failed` | `⚠ Sign In` |
-| `tos_required` | `⚠ Accept Terms` |
-| `rate_limited` | `⚠ Rate Limited` |
-| daemon offline | `⚠ Daemon Offline` |
-| daemon error | `⚠ Daemon Error` |
 
-The dropdown opens with an 8-hour glucose graph (faint colour bands at the configured thresholds, latest reading as a coloured dot) above the freshness/units rows. Menu actions: **Refresh Now**, **Force Re-Authenticate**, **Notifications**, **Update Credentials…**, **Set Thresholds…**, **Quit**.
+| Status         | Title              |
+| -------------- | ------------------ |
+| `ok`           | `124 →`            |
+| `stale`        | `124 →*`           |
+| `starting`     | `Starting…`        |
+| `warming_up`   | `Warming Up`       |
+| `sensor_ended` | `⚠ Sensor Ended`   |
+| `no_network`   | `⚠ Offline`        |
+| `auth_failed`  | `⚠ Sign In`        |
+| `tos_required` | `⚠ Accept Terms`   |
+| `rate_limited` | `⚠ Rate Limited`   |
+| daemon offline | `⚠ Daemon Offline` |
+| daemon error   | `⚠ Daemon Error`   |
+
+
+Menu actions: **Refresh Now**, **Force Re-Authenticate**, **Notifications**, **Update Credentials…**, **Set Thresholds…**, **Quit**.
 
 ## Configuration
 
@@ -132,7 +134,7 @@ See `.env.example` for the full list.
 ## Troubleshooting
 
 - **Account/region check fails**: run `.venv/bin/python scripts/phase0_probe.py` and fix `.env` values.
-- **`Another glucose daemon is already running`**: stop the other daemon process, then rerun install.
+- `**Another glucose daemon is already running`**: stop the other daemon process, then rerun install.
 - **Menubar keeps restarting**: `scripts/install_launchagent.sh logs` and inspect frontend errors.
 - **Dialogs do nothing in terminal mode**: expected fallback behavior; use LaunchAgent install for native dialogs.
 - **Rebuilt `.venv` or upgraded Python**: rerun `scripts/install_launchagent.sh install` to rebuild the wrapper app symlinks.
