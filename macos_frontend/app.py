@@ -70,7 +70,8 @@ from macos_frontend.notifier import NotificationPolicy, Notifier  # noqa: E402
 _GRAPH_HOURS = 8
 _GRAPH_WIDTH = 320
 _GRAPH_HEIGHT = 110
-# Horizontal tweak for status-menu popup (negative = left); see ``_StatusItemMenuPresenter``.
+# Horizontal tweak for status-menu popup (negative = left, in **points**); see
+# ``_StatusItemMenuPresenter``. On Retina, 1pt is often 2px.
 _MENU_POPUP_X_NUDGE_PT = -2.0
 # Used to measure ``NSAttributedString`` breadth for menu alignment (wide max, single line).
 _MENU_TITLE_MEASURE_SIZE = (2000.0, 500.0)
@@ -618,9 +619,12 @@ class _StatusItemMenuPresenter(NSObject):
         x = value_center_x - menu_w / 2.0 + _MENU_POPUP_X_NUDGE_PT
         bw = float(button.bounds().size.width)
         if menu_w <= bw:
-            x = max(0.0, min(x, bw - menu_w))
-        else:
-            x = max(0.0, x)
+            # Cap the right edge so the menu stays inside the pill; do **not**
+            # floor x to 0 — that would erase a negative nudge whenever the
+            # ideal origin is already left of the button (common when the menu
+            # is wider than the status item).
+            x = min(x, bw - menu_w)
+        # Wide menu: leave x as-is (often negative) so nudge and centering apply.
         loc = NSPoint(x, NSMinY(button.bounds()))
         ns_menu.popUpMenuPositioningItem_atLocation_inView_(None, loc, button)
 
