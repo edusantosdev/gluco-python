@@ -31,11 +31,11 @@ $EDITOR .env
 # 4) Save credentials to Keychain (recommended)
 .venv/bin/python scripts/set_credentials.py
 
-# 5) Install LaunchAgents (daemon + menubar, auto-start on login)
+# 5) Register LaunchAgents with macOS launchd (daemon + menubar, auto-start on login)
 scripts/install_launchagent.sh install
 ```
 
-Check status/logs:
+**Managed services** here means those two LaunchAgent jobs: `launchd` starts the daemon and the menubar for you, restarts them on crash, and brings them back after reboot/login. Check status/logs:
 
 ```bash
 scripts/install_launchagent.sh status
@@ -44,7 +44,7 @@ scripts/install_launchagent.sh logs
 
 ## Run Without LaunchAgents
 
-Run both in one shell:
+Skip `install_launchagent.sh` and start processes yourself—nothing is registered with `launchd`, so nothing auto-starts at login. Run both in one shell:
 
 ```bash
 .venv/bin/python -m daemon & DAEMON_PID=$!
@@ -62,10 +62,13 @@ Run only one side:
 ## Daily Commands
 
 ```bash
-# Restart managed services after code/config changes
+# Re-apply LaunchAgent config and restart both jobs (use after code or .env changes,
+# or to rebuild build/Glucose Menubar.app after recreating the venv)
 scripts/install_launchagent.sh install
 
-# Remove managed services
+# Unregister both LaunchAgents: stops launchd from auto-starting or restarting them,
+# and removes the plist files from ~/Library/LaunchAgents/. Run daemon/menubar manually
+# if you still need them, or reinstall later with install.
 scripts/install_launchagent.sh uninstall
 
 # Probe daemon API
