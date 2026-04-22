@@ -433,9 +433,9 @@ def _reading_menu_labels(reading: CurrentReading) -> tuple[str, str]:
         age = _humanize_age(reading.reading_age_seconds)
         unit = reading.unit or ""
         if local_hhmm != "—":
-            updated_line = f"Last Updated: {age} ({local_hhmm})"
+            updated_line = f"Last Updated {age} at {local_hhmm}"
         else:
-            updated_line = f"Last Updated: {age}"
+            updated_line = f"Last Updated {age}"
         unit_line = f"Units: {unit}" if unit else "Units: —"
         return (updated_line, unit_line)
     status = _STATUS_TEXT.get(reading.status, "Status: Unavailable")
