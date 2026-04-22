@@ -224,8 +224,7 @@ async def graph(hours: int = 12) -> list[GraphPoint]:
 
     Note: ``pylibrelinkup.graph()`` returns up to 12 hours; we honor ``hours``
     only as a client-side trim. This call hits Abbott synchronously inside an
-    async handler — fine for a personal tool with one client. Phase 3 may
-    cache the result.
+    async handler — fine for a personal tool with one client.
     """
     if _service.patient is None:
         raise HTTPException(status_code=503, detail="Daemon not authenticated")

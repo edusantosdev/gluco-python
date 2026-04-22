@@ -1,4 +1,4 @@
-"""Phase 2 macOS frontend — a thin rumps wrapper around the daemon HTTP API.
+"""macOS menubar frontend — a thin rumps wrapper around the daemon HTTP API.
 
 This module knows nothing about LibreLinkUp, credentials, regions, or
 trend codes. It maps daemon ``Status`` values to menubar glyphs and shows
@@ -348,17 +348,22 @@ def _native_single_field_dialog(
     return (ok, field.stringValue() or "")
 
 
-# Map daemon Status values to a single-character / short-text menubar title
-# for the *non-ok* cases. When status == "ok", we render the value directly.
+# Menubar title for each non-``ok`` daemon status. When status == "ok"
+# (or "stale" with a last-known value) we render the number directly.
+#
+# The goal is a title that is readable at a glance without opening the
+# dropdown — short but not cryptic. We keep the ``⚠`` prefix for any
+# state that demands user attention, so the eye can spot "something's
+# wrong" even without reading the words.
 _STATUS_GLYPH = {
-    "starting": "···",
-    "stale": "?",  # value is still shown alongside this
-    "warming_up": "◴",
-    "sensor_ended": "⚠ sensor",
-    "no_network": "⚠ net",
-    "auth_failed": "⚠ auth",
-    "tos_required": "⚠ ToS",
-    "rate_limited": "⚠ rate",
+    "starting": "Starting…",
+    "stale": "Stale",  # only used when the stale reading has no last value
+    "warming_up": "Warming Up",
+    "sensor_ended": "⚠ Sensor Ended",
+    "no_network": "⚠ Offline",
+    "auth_failed": "⚠ Sign In",
+    "tos_required": "⚠ Accept Terms",
+    "rate_limited": "⚠ Rate Limited",
 }
 
 
@@ -519,7 +524,9 @@ class GlucoseApp(rumps.App):
 
         self._client = DaemonClient(base_url=base_url)
 
-        # Explicit Timer rather than @rumps.timer — same reasoning as in mvp.py.
+        # Explicit Timer rather than @rumps.timer — the decorator hides
+        # the interval-mutation trick behind rumps internals; an explicit
+        # Timer is easier to reason about (and to swap out in tests).
         self._timer = rumps.Timer(self._on_tick, poll_interval)
         self._timer.start()
         self._on_tick(None)
@@ -567,13 +574,13 @@ class GlucoseApp(rumps.App):
             reading = self._client.current()
         except DaemonUnreachable as e:
             log.warning("Daemon unreachable: %s", e)
-            self._set_title("⚠ daemon")
+            self._set_title("⚠ Daemon Offline")
             self._reading_updated_item.title = "Background Service Offline"
             self._reading_unit_item.title = "Start the Daemon"
             return
         except DaemonError as e:
             log.warning("Daemon error: %s", e)
-            self._set_title("⚠ daemon")
+            self._set_title("⚠ Daemon Error")
             self._reading_updated_item.title = "Background Service Error"
             self._reading_unit_item.title = "Try Force Re-Authenticate"
             return

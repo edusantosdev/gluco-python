@@ -271,10 +271,6 @@ class MacOSNotificationBackend:
             )
 
 
-# Backward compatibility — older code referred to this name.
-RumpsNotificationBackend = MacOSNotificationBackend
-
-
 class Notifier:
     """Bridges ``NotificationPolicy`` and a delivery backend."""
 

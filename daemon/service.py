@@ -9,8 +9,8 @@ we run the poller in a dedicated daemon thread. FastAPI handlers stay
 ``async`` and do non-blocking reads from a lock-guarded ``DaemonState``
 snapshot. This decouples poll cadence from request latency entirely.
 
-Phase 3 additions (this revision)
----------------------------------
+Robustness features
+-------------------
 
 * Disk-backed session persistence via :class:`FileSessionStore`, so
   daemon restarts don't trigger a fresh LibreView login.

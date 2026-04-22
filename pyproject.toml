@@ -31,9 +31,8 @@ dev = ["pytest>=8.0", "ruff>=0.4"]
 
 # Flat layout with three sibling top-level packages — setuptools' default
 # auto-discovery refuses to build that without an explicit list, so we
-# enumerate them here. ``mvp.py`` and ``scripts/`` stay outside the
-# package set on purpose: the MVP is a single-file script, and scripts
-# are run directly from the repo, not installed.
+# enumerate them here. ``scripts/`` stays out on purpose: those are run
+# directly from the repo, not installed as part of the package.
 [tool.setuptools]
 packages = ["daemon", "glucose_common", "macos_frontend"]
 

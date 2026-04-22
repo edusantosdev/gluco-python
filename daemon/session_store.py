@@ -23,10 +23,9 @@ If parsing fails, we fall back to a conservative TTL set at save time.
 Security notes
 --------------
 The token grants read access to the *connections* endpoints for this
-LibreLinkUp account. We store it mode-0600 under ``state_dir``. This is
-equivalent in sensitivity to the plaintext credentials in ``.env`` that
-the daemon already reads; upgrading to Keychain via ``keyring`` is a
-Phase 4 nicety.
+LibreLinkUp account. We store it mode-0600 under ``state_dir`` — same
+sensitivity tier as the credentials that produced it (Keychain or
+``.env``).
 """
 
 from __future__ import annotations

@@ -16,8 +16,8 @@ class Status(str, Enum):
     STARTING = "starting"  # daemon up, no reading yet
     OK = "ok"  # fresh reading, sensor talking
     STALE = "stale"  # last reading older than the staleness window
-    WARMING_UP = "warming_up"  # sensor in 60-min warm-up (Phase 3 detection)
-    SENSOR_ENDED = "sensor_ended"  # sensor expired (Phase 3 detection)
+    WARMING_UP = "warming_up"  # sensor in 60-min warm-up
+    SENSOR_ENDED = "sensor_ended"  # sensor expired
     NO_NETWORK = "no_network"  # connection failures, backing off
     AUTH_FAILED = "auth_failed"  # credentials rejected
     TOS_REQUIRED = "tos_required"  # user must accept in Libre app

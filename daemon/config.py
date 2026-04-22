@@ -4,8 +4,8 @@ Reads from environment variables (and ``.env`` if present). Centralizing
 config here means everything else in the daemon can ask for ``settings.X``
 without doing its own env parsing.
 
-Credentials note (Phase 4)
---------------------------
+Credentials
+-----------
 Email + password may come from either the macOS Keychain (via
 ``glucose_common.credentials``) or from ``.env``. To keep the same code
 path across dev and production, we let pydantic ingest env vars freely
@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     host: str = Field(default="127.0.0.1", alias="DAEMON_HOST")
     port: int = Field(default=8765, alias="DAEMON_PORT")
 
-    # Where to put the lockfile and (Phase 3) the session store / logs.
+    # Where to put the lockfile, session store, and rotating log.
     state_dir: Path = Field(default_factory=_default_state_dir, alias="DAEMON_STATE_DIR")
 
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
