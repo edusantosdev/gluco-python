@@ -12,10 +12,12 @@ Run::
 from __future__ import annotations
 
 import logging
+import math
 import os
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -32,6 +34,7 @@ from AppKit import (
     NSFontAttributeName,
     NSForegroundColorAttributeName,
     NSMakeRect,
+    NSMutableAttributedString,
     NSSecureTextField,
     NSStackView,
     NSTextField,
@@ -65,6 +68,29 @@ from macos_frontend.notifier import NotificationPolicy, Notifier  # noqa: E402
 _GRAPH_HOURS = 8
 _GRAPH_WIDTH = 320
 _GRAPH_HEIGHT = 110
+
+# Title pulse animation. The value and arrow gently fade together on a
+# shared cosine curve whenever the reading's trend is directional
+# (rising or falling, slow or fast). Values chosen for a calm, ambient
+# feel:
+#   * ``_PULSE_PERIOD_S`` — 3s is slow enough to be peripheral-vision-
+#     noticeable without being distracting (roughly a breathing rhythm,
+#     ~20 cycles/min).
+#   * ``_PULSE_MIN_ALPHA`` — keeps both the value and arrow clearly
+#     legible at the dimmest point. Dropping below ~0.4 starts to read
+#     as "broken"; pulling too close to 1.0 removes the effect.
+#   * ``_PULSE_TICK_S`` — 10 fps; the glyphs are tiny and the motion is
+#     low-amplitude, so anything faster burns CPU without improving
+#     smoothness. Separate ``rumps.Timer`` so the poll cadence stays at
+#     its configured value.
+# Only codes 1/2/4/5 (↓ ↘ ↗ ↑) pulse. Code 3 (→ stable) is left static —
+# animating a sideways arrow would suggest motion that isn't there.
+# The trailing ``*`` on stale readings never pulses; it's a status flag,
+# not part of the live reading.
+_PULSE_PERIOD_S = 3.0
+_PULSE_TICK_S = 0.1
+_PULSE_MIN_ALPHA = 0.45
+_ARROW_PULSE_SYMBOLS = frozenset({"↓", "↘", "↗", "↑"})
 
 logging.basicConfig(
     level=logging.INFO,
@@ -376,15 +402,33 @@ _STATUS_GLYPH = {
 }
 
 
-def _format_title(reading: CurrentReading) -> str:
+def _title_parts(reading: CurrentReading) -> tuple[str, str, str]:
+    """Split the title into (value, arrow, trailing) for animated rendering.
+
+    The pulse animation needs to apply an alpha to the arrow glyph only,
+    so the title can't be a single opaque string. We return three pieces:
+
+    * ``value`` — the numeric reading (or a status glyph when there's no
+      number to show). Always present.
+    * ``arrow`` — the trend symbol (possibly empty). Includes a leading
+      space so joining the pieces produces the same spacing as before.
+    * ``trailing`` — status suffix; currently just ``"*"`` on stale
+      readings to flag "this might be old".
+
+    Error states carry the whole glyph in ``value`` with the other two
+    empty — ``⚠ Offline`` shouldn't pulse anything.
+    """
     if reading.status == "ok" and reading.value is not None:
+        value = str(int(round(reading.value)))
         arrow = reading.trend_symbol or ""
-        return f"{int(round(reading.value))} {arrow}".strip()
+        arrow_part = f" {arrow}" if arrow else ""
+        return value, arrow_part, ""
     if reading.status == "stale" and reading.value is not None:
-        # Keep the last known value visible but mark it as stale with a trailing *
+        value = str(int(round(reading.value)))
         arrow = reading.trend_symbol or ""
-        return f"{int(round(reading.value))} {arrow}*".strip()
-    return _STATUS_GLYPH.get(reading.status, "⚠")
+        arrow_part = f" {arrow}" if arrow else ""
+        return value, arrow_part, "*"
+    return _STATUS_GLYPH.get(reading.status, "⚠"), "", ""
 
 
 # --- Color thresholds -------------------------------------------------------
@@ -545,48 +589,199 @@ class GlucoseApp(rumps.App):
 
         self._client = DaemonClient(base_url=base_url)
 
+        # Cached pieces of the current title. Set by ``_on_tick`` and
+        # re-read by ``_on_animation_tick`` between polls so the arrow
+        # pulse can re-render the title without re-fetching from the
+        # daemon on every animation frame.
+        self._title_value: str = ""
+        self._title_arrow: str = ""
+        self._title_trailing: str = ""
+        self._title_color = None
+        # Wall-clock anchor for the pulse phase. Using a monotonic clock
+        # means the animation keeps phase across daemon hiccups and
+        # doesn't jump when the system clock is adjusted.
+        self._arrow_pulse_anchor: float = time.monotonic()
+
         # Explicit Timer rather than @rumps.timer — the decorator hides
         # the interval-mutation trick behind rumps internals; an explicit
         # Timer is easier to reason about (and to swap out in tests).
         self._timer = rumps.Timer(self._on_tick, poll_interval)
+        # Separate, faster timer for the trend-arrow pulse. Only started
+        # when the current reading has a directional arrow; stopped as
+        # soon as the trend goes stable (or the reading becomes an error
+        # glyph) so we're not waking the runloop 10×/s for nothing.
+        self._arrow_pulse_timer = rumps.Timer(
+            self._on_arrow_pulse_tick, _PULSE_TICK_S
+        )
         self._timer.start()
         self._on_tick(None)
 
     # --- title rendering ---
 
     def _set_title(self, text: str, color=None) -> None:
-        """Set the menubar title.
+        """Set a plain (non-arrowed) menubar title.
 
-        rumps's ``self.title = ...`` only handles plain text. To colour the
-        text we set the underlying ``NSStatusBarButton.attributedTitle``
-        with an ``NSAttributedString``. We *always* go through this helper
-        (color=None falls back to the default label colour) so the two
-        title channels never conflict — mixing them leaves stale colour
-        from a previous tick visible.
+        Used for error glyphs that have no trend arrow to animate. The
+        ``ok``/``stale`` paths go through :meth:`_render_title_parts`
+        instead so the value and arrow can fade under the pulse.
         """
+        self._render_title_parts(
+            text, "", "", color, value_alpha=1.0, arrow_alpha=1.0
+        )
+
+    def _render_title_parts(
+        self,
+        value_text: str,
+        arrow_text: str,
+        trailing_text: str,
+        color,
+        value_alpha: float,
+        arrow_alpha: float,
+    ) -> None:
+        """Paint ``value + arrow + trailing`` into the status bar button.
+
+        rumps's ``self.title = ...`` only handles plain text. To colour
+        the text (and to fade individual runs under the pulse) we set
+        ``NSStatusBarButton.attributedTitle`` with a mutable attributed
+        string carrying per-range attributes. All title updates go
+        through here so the two title channels never conflict — mixing
+        plain and attributed titles leaves stale colour from a previous
+        tick visible.
+
+        The three runs are coloured independently:
+
+        * ``value_text`` fades at ``value_alpha``.
+        * ``arrow_text`` fades at ``arrow_alpha``.
+        * ``trailing_text`` always paints at full alpha; its only
+          current use is the ``*`` on stale readings, which is a status
+          flag and shouldn't share the live-data pulse.
+
+        Kept as two parameters (not one) because it lets callers fade
+        runs independently if we ever want to, even though the current
+        caller passes the same value to both.
+        """
+        full_text = f"{value_text}{arrow_text}{trailing_text}"
+
         nsapp = getattr(self, "_nsapp", None)
         if nsapp is None or not hasattr(nsapp, "nsstatusitem"):
             # Pre-runloop tick (very early in __init__) — fall back to plain.
-            self.title = text
+            self.title = full_text
             return
         button = nsapp.nsstatusitem.button()
         if button is None:
-            self.title = text
+            self.title = full_text
             return
-        if color is None:
-            color = NSColor.labelColor()
-        # Cocoa expects specific attribute-name constants; generic string keys
-        # are ignored, which leaves the text in default monochrome.
-        attrs = {
-            NSForegroundColorAttributeName: color,
+
+        base_color = color if color is not None else NSColor.labelColor()
+        # Cocoa expects specific attribute-name constants; generic string
+        # keys are ignored, which leaves the text in default monochrome.
+        base_attrs = {
+            NSForegroundColorAttributeName: base_color,
             NSFontAttributeName: NSFont.menuBarFontOfSize_(0),
         }
         try:
-            attr_string = NSAttributedString.alloc().initWithString_attributes_(text, attrs)
+            attr_string = NSMutableAttributedString.alloc().initWithString_attributes_(
+                full_text, base_attrs
+            )
+            # Range math: the three runs are appended in order, so their
+            # locations are the cumulative lengths. ``arrow_text`` carries
+            # its own leading space (see ``_title_parts``) so there's no
+            # "+1" fudge for the separator here.
+            if value_text and 0.0 <= value_alpha < 1.0:
+                value_color = base_color.colorWithAlphaComponent_(value_alpha)
+                attr_string.addAttribute_value_range_(
+                    NSForegroundColorAttributeName,
+                    value_color,
+                    (0, len(value_text)),
+                )
+            if arrow_text and 0.0 <= arrow_alpha < 1.0:
+                arrow_color = base_color.colorWithAlphaComponent_(arrow_alpha)
+                attr_string.addAttribute_value_range_(
+                    NSForegroundColorAttributeName,
+                    arrow_color,
+                    (len(value_text), len(arrow_text)),
+                )
             button.setAttributedTitle_(attr_string)
         except Exception:  # noqa: BLE001
             # Never crash UI updates over attributed-title quirks.
-            self.title = text
+            self.title = full_text
+
+    def _pulse_envelope(self) -> float:
+        """Shared 0..1 envelope for the title pulse.
+
+        Cosine easing over ``_PULSE_PERIOD_S`` gives equal-feeling dwell
+        at the bright and dim ends — reads as a natural breathing pulse
+        rather than a rigid blink. Value and arrow alphas are both
+        interpolated off this single envelope so they stay phase-locked;
+        independent sines would drift visibly and feel uncoordinated.
+        """
+        elapsed = time.monotonic() - self._arrow_pulse_anchor
+        phase = (elapsed / _PULSE_PERIOD_S) * 2 * math.pi
+        return 0.5 + 0.5 * math.cos(phase)  # 0..1
+
+    def _repaint_title(self, *, animating: bool) -> None:
+        """Render the cached title parts at the current animation phase."""
+        if animating:
+            env = self._pulse_envelope()
+            alpha = _PULSE_MIN_ALPHA + (1.0 - _PULSE_MIN_ALPHA) * env
+        else:
+            alpha = 1.0
+        # Value and arrow share one alpha so they pulse identically;
+        # applying the same number to both ranges is simpler than two
+        # parameters that always happen to be equal.
+        self._render_title_parts(
+            self._title_value,
+            self._title_arrow,
+            self._title_trailing,
+            self._title_color,
+            value_alpha=alpha,
+            arrow_alpha=alpha,
+        )
+
+    def _on_arrow_pulse_tick(self, _sender) -> None:
+        # Cheap safety net: if we somehow end up here with a non-directional
+        # arrow, just stop the timer rather than burning frames.
+        if self._title_arrow.strip() not in _ARROW_PULSE_SYMBOLS:
+            self._arrow_pulse_timer.stop()
+            self._repaint_title(animating=False)
+            return
+        self._repaint_title(animating=True)
+
+    def _apply_title_parts(
+        self,
+        value_text: str,
+        arrow_text: str,
+        trailing_text: str,
+        color,
+    ) -> None:
+        """Cache the title parts + manage the pulse timer, then paint once.
+
+        Called by :meth:`_on_tick` on every poll. Whether the pulse
+        animation runs is a function of the arrow glyph: directional
+        arrows (``↓ ↘ ↗ ↑``) pulse; the sideways ``→`` and empty strings
+        sit still. Changing the arrow resets the pulse phase so the
+        transition starts at full brightness rather than snapping
+        mid-cycle, which would read as a glitch.
+        """
+        animate = arrow_text.strip() in _ARROW_PULSE_SYMBOLS
+        # Reset the phase when the displayed arrow changes so a new
+        # trend enters the screen at peak alpha rather than mid-fade.
+        if arrow_text != self._title_arrow:
+            self._arrow_pulse_anchor = time.monotonic()
+
+        self._title_value = value_text
+        self._title_arrow = arrow_text
+        self._title_trailing = trailing_text
+        self._title_color = color
+
+        if animate:
+            if not self._arrow_pulse_timer.is_alive():
+                self._arrow_pulse_timer.start()
+        else:
+            if self._arrow_pulse_timer.is_alive():
+                self._arrow_pulse_timer.stop()
+
+        self._repaint_title(animating=animate)
 
     # --- timer / menu callbacks ---
 
@@ -595,18 +790,18 @@ class GlucoseApp(rumps.App):
             reading = self._client.current()
         except DaemonUnreachable as e:
             log.warning("Daemon unreachable: %s", e)
-            self._set_title("⚠ Daemon Offline")
+            self._apply_title_parts("⚠ Daemon Offline", "", "", color=None)
             self._reading_updated_item.title = "Background Service Offline"
             self._graph_view.setPoints_([])
             return
         except DaemonError as e:
             log.warning("Daemon error: %s", e)
-            self._set_title("⚠ Daemon Error")
+            self._apply_title_parts("⚠ Daemon Error", "", "", color=None)
             self._reading_updated_item.title = "Background Service Error"
             self._graph_view.setPoints_([])
             return
 
-        title = _format_title(reading)
+        value_part, arrow_part, trailing_part = _title_parts(reading)
         # Only colour when we actually have a numeric value to evaluate.
         # Stale readings still get coloured (the value is the most recent
         # known truth), error glyphs use default text colour.
@@ -614,7 +809,7 @@ class GlucoseApp(rumps.App):
         value_for_color = reading.value_in_mg_per_dl
         if reading.status in ("ok", "stale") and value_for_color is not None:
             color = _color_for(value_for_color, self.thresholds)
-        self._set_title(title, color=color)
+        self._apply_title_parts(value_part, arrow_part, trailing_part, color=color)
 
         u_line, _units_line = _reading_menu_labels(reading)
         self._reading_updated_item.title = u_line
