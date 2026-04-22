@@ -89,7 +89,7 @@ curl -s -X POST http://127.0.0.1:8765/auth/refresh | jq
 | daemon offline | `⚠ Daemon Offline` |
 | daemon error | `⚠ Daemon Error` |
 
-Menu actions: **Refresh Now**, **Force Re-Authenticate**, **Notifications**, **Update Credentials…**, **Set Thresholds…**, **Quit**.
+The dropdown opens with an 8-hour glucose graph (faint colour bands at the configured thresholds, latest reading as a coloured dot) above the freshness/units rows. Menu actions: **Refresh Now**, **Force Re-Authenticate**, **Notifications**, **Update Credentials…**, **Set Thresholds…**, **Quit**.
 
 ## Configuration
 

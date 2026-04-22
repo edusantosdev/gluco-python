@@ -31,7 +31,7 @@ import threading
 import time
 import warnings
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from pylibrelinkup import (
     APIUrl,
@@ -53,6 +53,11 @@ log = logging.getLogger(__name__)
 # TOS_REQUIRED can't self-heal — the user needs to click accept — so we
 # just poke it every few minutes.
 _BACKOFF_ON_TOS_SECONDS = 300
+
+# How much history to keep in memory so the frontend graph can read it
+# without hitting Abbott. ``pylibrelinkup`` returns up to ~12h of data;
+# we keep a generous window so the menubar can ask for any sub-range.
+_HISTORY_RETAIN_HOURS = 12
 
 
 class GlucoseService:
@@ -159,6 +164,7 @@ class GlucoseService:
         reading: object | None = None,
         fetched_at: datetime | None = None,
         last_error: str | None = ...,  # type: ignore[assignment]
+        history: list[tuple[datetime, float]] | None = None,
         bump_failures: bool = False,
         reset_failures: bool = False,
     ) -> None:
@@ -171,6 +177,10 @@ class GlucoseService:
                 self._state.fetched_at = fetched_at
             if last_error is not ...:
                 self._state.last_error = last_error
+            if history is not None:
+                # Whole-list replacement, never in-place mutation, so other
+                # threads holding a snapshot keep seeing a stable list.
+                self._state.history = history
             if bump_failures:
                 self._state.consecutive_failures += 1
             if reset_failures:
@@ -370,8 +380,40 @@ class GlucoseService:
             reading=reading,
             fetched_at=now,
             last_error=None,
+            history=self._normalize_history(history, now=now),
             reset_failures=True,
         )
+
+    @staticmethod
+    def _normalize_history(
+        raw: list, *, now: datetime, retain_hours: int = _HISTORY_RETAIN_HOURS
+    ) -> list[tuple[datetime, float]]:
+        """Convert raw ``graph_data`` measurements into ``(utc_ts, mg_dl)`` tuples.
+
+        We store mg/dL regardless of the user's display unit because the
+        frontend graph picks colours by mg/dL thresholds; mmol/L users still
+        get the right colour bands. The list is sorted oldest-first and
+        clamped to ``retain_hours`` so memory doesn't grow unboundedly if
+        Libre starts returning longer histories in a future API version.
+        """
+        cutoff = now - timedelta(hours=retain_hours)
+        points: list[tuple[datetime, float]] = []
+        for r in raw or []:
+            ts = getattr(r, "factory_timestamp", None) or getattr(r, "timestamp", None)
+            if ts is None:
+                continue
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=UTC)
+            if ts < cutoff:
+                continue
+            value = getattr(r, "value_in_mg_per_dl", None)
+            if value is None:
+                value = getattr(r, "value", None)
+            if value is None:
+                continue
+            points.append((ts, float(value)))
+        points.sort(key=lambda p: p[0])
+        return points
 
     # --- internals: classification ---
 

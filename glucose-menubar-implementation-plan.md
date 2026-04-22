@@ -778,7 +778,7 @@ Things that don't need answers now but will come up:
 
 **Multiple sensors/patients.** The MVP assumes one patient, one sensor. If you have followers in LibreLinkUp (family members' data), the daemon would need a patient-selection endpoint and the frontend a picker. Probably out of scope forever for personal use, but worth noting.
 
-**Historical data and graphs.** A menubar app naturally wants a dropdown with the last few hours. `pylibrelinkup.graph()` returns 12 hours of 1-minute readings, which is plenty. Question: render in the rumps menu (ASCII sparkline) or pop out a small SwiftUI/GTK window? Deferred until you want it.
+**Historical data and graphs.** *Implemented.* The dropdown opens with an 8-hour line graph rendered as a custom `NSView` attached to a `rumps.MenuItem` via `setView_`. The daemon caches the normalized history (`(utc_ts, mg_dl)` tuples, ≤12h) inside `DaemonState` from each successful poll, so `/glucose/graph?hours=8` is served from memory with no extra Abbott round-trip. The view shows faint coloured threshold bands (red/green/yellow/orange) behind the line, with the latest reading as a coloured dot — same colour palette as the menubar title, so the eye learns the mapping.
 
 **Offline behavior.** If the machine has no network for an hour, what should the menubar show? Last known value with a staleness indicator is probably right, but "last known value from 3 days ago" is actively misleading. Define a staleness cutoff (15 minutes?) and show "no data" beyond it.
 

@@ -175,6 +175,38 @@ def test_tick_records_ok_reading(service: GlucoseService) -> None:
     assert sleep_for == service.poll_interval  # reset on success
 
 
+def test_tick_caches_normalized_history(service: GlucoseService) -> None:
+    """Poll loop should publish ``(utc_ts, mg_dl)`` tuples into ``state.history``."""
+    assert service._authenticate_once()
+    history = [_fake_reading(age_seconds=i * 60, value=100.0 + i) for i in range(5)]
+    service.client.read_queue.append(
+        _fake_graph_response(reading_age_seconds=30, history=history)
+    )
+    service._tick()
+    cached = service.snapshot().history
+    assert len(cached) == len(history)
+    # Sorted oldest-first.
+    assert all(cached[i][0] <= cached[i + 1][0] for i in range(len(cached) - 1))
+    # Values preserved as mg/dL floats.
+    assert {round(v, 0) for _, v in cached} == {100.0, 101.0, 102.0, 103.0, 104.0}
+
+
+def test_tick_drops_history_older_than_retention(service: GlucoseService) -> None:
+    """Points outside the 12h retention window should be filtered out."""
+    assert service._authenticate_once()
+    history = [
+        _fake_reading(age_seconds=60, value=110.0),  # fresh, kept
+        _fake_reading(age_seconds=13 * 3600, value=200.0),  # 13h old, dropped
+    ]
+    service.client.read_queue.append(
+        _fake_graph_response(reading_age_seconds=60, history=history)
+    )
+    service._tick()
+    cached = service.snapshot().history
+    assert len(cached) == 1
+    assert round(cached[0][1]) == 110
+
+
 def test_tick_marks_stale_when_reading_too_old(service: GlucoseService) -> None:
     assert service._authenticate_once()
     service.client.read_queue.append(

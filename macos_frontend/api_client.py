@@ -7,6 +7,7 @@ directly, and it should never need anything more than what's exposed here.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -80,3 +81,35 @@ class DaemonClient:
         resp = self._client.post("/auth/refresh")
         resp.raise_for_status()
         return resp.json()
+
+    def graph(self, hours: int = 8) -> list[GraphPoint]:
+        """Fetch cached historical readings from the daemon (oldest first).
+
+        Returns ``[]`` if the daemon hasn't completed a successful poll yet.
+        Raises ``DaemonUnreachable`` on transport errors and ``DaemonError``
+        on 5xx responses, matching the ``current()`` contract.
+        """
+        try:
+            resp = self._client.get("/glucose/graph", params={"hours": hours})
+        except httpx.HTTPError as e:
+            raise DaemonUnreachable(str(e)) from e
+        if resp.status_code >= 500:
+            raise DaemonError(f"{resp.status_code} {resp.text[:200]}")
+        resp.raise_for_status()
+        out: list[GraphPoint] = []
+        for item in resp.json():
+            ts_raw = item.get("timestamp")
+            value = item.get("value")
+            if ts_raw is None or value is None:
+                continue
+            ts = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=UTC)
+            out.append(GraphPoint(value_mg_dl=float(value), timestamp=ts))
+        return out
+
+
+@dataclass
+class GraphPoint:
+    value_mg_dl: float
+    timestamp: datetime  # tz-aware UTC

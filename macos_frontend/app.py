@@ -55,7 +55,16 @@ from macos_frontend.api_client import (  # noqa: E402
     DaemonError,
     DaemonUnreachable,
 )
+from macos_frontend.graph_view import GlucoseGraphView, GraphThresholds  # noqa: E402
 from macos_frontend.notifier import NotificationPolicy, Notifier  # noqa: E402
+
+# Graph appears at the top of the dropdown above the freshness/units rows.
+# 8 hours is the sweet spot between "see today's pattern" and "fits in a
+# menu item without dominating the screen". Width is wide enough to make
+# minute-resolution shape visible but not so wide that the menu overflows.
+_GRAPH_HOURS = 8
+_GRAPH_WIDTH = 320
+_GRAPH_HEIGHT = 110
 
 logging.basicConfig(
     level=logging.INFO,
@@ -510,7 +519,21 @@ class GlucoseApp(rumps.App):
         self._thresholds_item = rumps.MenuItem(
             "Set Thresholds…", callback=self._on_edit_thresholds
         )
+
+        # Graph item at the top of the dropdown. ``rumps.MenuItem`` wraps an
+        # ``NSMenuItem`` (exposed as ``._menuitem``); attaching a custom NSView
+        # via ``setView_`` is the supported way to embed non-text content in
+        # an AppKit menu. The empty title is ignored once a view is present.
+        self._graph_view = GlucoseGraphView.alloc().initWithFrame_hours_(
+            NSMakeRect(0, 0, _GRAPH_WIDTH, _GRAPH_HEIGHT), _GRAPH_HOURS
+        )
+        self._graph_view.setThresholds_(self._graph_thresholds())
+        self._graph_item = rumps.MenuItem("")
+        self._graph_item._menuitem.setView_(self._graph_view)
+
         self.menu = [
+            self._graph_item,
+            None,
             self._reading_updated_item,
             self._reading_unit_item,
             None,
@@ -605,6 +628,32 @@ class GlucoseApp(rumps.App):
                 reading_age_seconds=reading.reading_age_seconds,
                 status=reading.status,
             )
+
+        self._refresh_graph()
+
+    def _refresh_graph(self) -> None:
+        """Pull the latest cached history from the daemon and push it to the view.
+
+        Errors here are non-fatal — the title and text rows already convey
+        connectivity state, so a missing graph just clears to its empty
+        placeholder rather than throwing up another error glyph.
+        """
+        try:
+            points = self._client.graph(hours=_GRAPH_HOURS)
+        except (DaemonUnreachable, DaemonError) as e:
+            log.debug("Graph fetch failed: %s", e)
+            self._graph_view.setPoints_([])
+            return
+        self._graph_view.setPoints_(
+            [(p.timestamp.timestamp(), p.value_mg_dl) for p in points]
+        )
+
+    def _graph_thresholds(self) -> GraphThresholds:
+        return GraphThresholds(
+            low=self.thresholds.low,
+            high=self.thresholds.high,
+            very_high=self.thresholds.very_high,
+        )
 
     def _on_refresh(self, _sender) -> None:
         log.info("Manual refresh")
@@ -783,9 +832,14 @@ class GlucoseApp(rumps.App):
             self._notifier.policy.low = low
             self._notifier.policy.high = high
             self._notifier.policy.very_high = very_high
-        # The next rumps timer tick will re-render with the new thresholds
-        # — we deliberately don't call ``_on_tick`` here because that
-        # would touch AppKit UI off the main thread.
+        # Push new band edges into the graph view immediately. ``setThresholds_``
+        # only mutates a Python attribute and calls ``setNeedsDisplay:`` (which
+        # AppKit documents as thread-safe); the actual redraw still happens on
+        # the main thread on the next runloop pass.
+        self._graph_view.setThresholds_(self._graph_thresholds())
+        # The next rumps timer tick will re-render the title with the new
+        # thresholds — we deliberately don't call ``_on_tick`` here because
+        # that would touch AppKit UI off the main thread.
 
 
 def _build_notifier(thresholds: ColorThresholds) -> Notifier:

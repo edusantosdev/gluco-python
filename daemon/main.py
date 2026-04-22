@@ -219,28 +219,23 @@ async def current() -> CurrentResponse:
 
 
 @app.get("/glucose/graph", response_model=list[GraphPoint])
-async def graph(hours: int = 12) -> list[GraphPoint]:
-    """Return historical readings.
+async def graph(hours: int = 8) -> list[GraphPoint]:
+    """Return cached historical readings, oldest first.
 
-    Note: ``pylibrelinkup.graph()`` returns up to 12 hours; we honor ``hours``
-    only as a client-side trim. This call hits Abbott synchronously inside an
-    async handler — fine for a personal tool with one client.
+    Reads from the in-memory snapshot the poll loop maintains — no extra
+    Abbott round-trip. ``hours`` is a client-side trim against whatever
+    window the daemon happens to retain (currently 12h). Returns an empty
+    list if no successful poll has happened yet.
     """
-    if _service.patient is None:
-        raise HTTPException(status_code=503, detail="Daemon not authenticated")
-    try:
-        readings = _service.client.graph(_service.patient)
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}") from e
+    snap = _service.snapshot()
+    if not snap.history:
+        return []
     cutoff = _now().timestamp() - hours * 3600
-    points = []
-    for r in readings:
-        ts = r.timestamp
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=UTC)
-        if ts.timestamp() >= cutoff:
-            points.append(GraphPoint(value=float(r.value), timestamp=ts))
-    return points
+    return [
+        GraphPoint(value=mg_dl, timestamp=ts)
+        for ts, mg_dl in snap.history
+        if ts.timestamp() >= cutoff
+    ]
 
 
 @app.get("/patient", response_model=PatientResponse)

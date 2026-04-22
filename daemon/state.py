@@ -34,6 +34,12 @@ class DaemonState:
     last_error: str | None = None
     consecutive_failures: int = 0
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    # Normalized recent measurements (oldest first) as ``(utc_ts, mg_dl)``
+    # tuples. Populated each successful poll from ``graph_response.data.graph_data``
+    # so the ``/glucose/graph`` endpoint can serve from memory without any
+    # extra Abbott round-trip. We always *replace* this list (never mutate it
+    # in place), so sharing the reference across snapshots is safe.
+    history: list[tuple[datetime, float]] = field(default_factory=list)
 
 
 def http_status_summary(s: Status) -> str:
