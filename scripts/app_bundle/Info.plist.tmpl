@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Info.plist for the Glucose Menubar frontend .app bundle.
+
+  The whole point of this bundle is *not* to freeze Python — it's to
+  give AppKit a bundle identity for our otherwise-unbundled Python
+  process. Several AppKit features check for ``CFBundleIdentifier``
+  on the containing bundle and silently disable themselves (or, in
+  some cases, cause launchd to kill the process) when it's missing:
+
+    * ``rumps.notification`` / ``NSUserNotification`` delivery.
+    * ``NSAlert.runModal()`` and ``rumps.Window.run()`` from a
+      menubar callback.
+    * ``NSApplication.activateIgnoringOtherApps_`` for foregrounding.
+
+  ``LSUIElement=true`` declares this as a menubar-only app: no Dock
+  icon, no app switcher entry, exactly what we want.
+
+  The Python interpreter inherits this bundle identity because
+  launchd spawns it via ``Contents/MacOS/launcher`` inside the
+  bundle, and Launch Services infers the bundle from the executable
+  path. ``exec`` from the shell stub preserves that.
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Glucose Menubar</string>
+
+    <key>CFBundleDisplayName</key>
+    <string>Glucose Menubar</string>
+
+    <key>CFBundleIdentifier</key>
+    <string>com.glucose-display.frontend</string>
+
+    <key>CFBundleVersion</key>
+    <string>0.1.0</string>
+
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <key>CFBundleSignature</key>
+    <string>????</string>
+
+    <!--
+      The executable name must match a real file in ``Contents/MacOS/``.
+      The install script creates ``Contents/MacOS/Glucose Menubar`` as a
+      symlink to the venv's Python, so ``CFBundleExecutable`` matches.
+      When launchd spawns it with ``-m macos_frontend``, Python finds
+      ``pyvenv.cfg`` at ``Contents/`` and picks up the venv.
+    -->
+    <key>CFBundleExecutable</key>
+    <string>Glucose Menubar</string>
+
+    <key>LSUIElement</key>
+    <true/>
+
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+
+    <key>NSHighResolutionCapable</key>
+    <true/>
+
+    <key>NSHumanReadableCopyright</key>
+    <string>Personal utility — not a medical device.</string>
+</dict>
+</plist>

@@ -9,6 +9,13 @@
   relaunches). rumps needs a GUI session; ProcessType=Interactive +
   LimitLoadToSessionType=Aqua makes launchd load this only in a real
   login session, not in loginwindow or an SSH session.
+
+  We launch the ``.app`` bundle's ``Contents/MacOS/launcher`` rather
+  than invoking ``python -m macos_frontend`` directly, so AppKit
+  resolves ``NSBundle.mainBundle`` to our bundle and sees its
+  ``CFBundleIdentifier`` / ``LSUIElement``. Without that, modal
+  dialogs and NSUserNotification delivery silently fail and launchd
+  ends up in a crash/relaunch loop.
 -->
 <plist version="1.0">
 <dict>
@@ -17,7 +24,7 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>__VENV_PYTHON__</string>
+        <string>__APP_EXECUTABLE__</string>
         <string>-m</string>
         <string>macos_frontend</string>
     </array>

@@ -20,15 +20,25 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+import objc
 import rumps
 from AppKit import (
+    NSAlert,
+    NSAlertFirstButtonReturn,
+    NSApp,
     NSAttributedString,
     NSColor,
     NSFont,
     NSFontAttributeName,
     NSForegroundColorAttributeName,
+    NSMakeRect,
+    NSSecureTextField,
+    NSStackView,
+    NSTextField,
+    NSUserInterfaceLayoutOrientationVertical,
 )
 from dotenv import load_dotenv
+from Foundation import NSBundle, NSObject
 
 # Allow ``python -m macos_frontend`` and ``python macos_frontend/app.py``.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -53,31 +63,33 @@ logging.basicConfig(
 )
 log = logging.getLogger("glucose.frontend")
 
-# Why we use AppleScript (``osascript``) dialogs instead of ``rumps.Window`` /
-# ``rumps.alert``:
+# Dialog strategy: native NSAlert when bundled, osascript fallback otherwise.
 #
-# Unbundled Python processes started by launchd don't have a proper
-# ``Info.plist`` with a ``CFBundleIdentifier``. Several AppKit UI APIs
-# refuse to work in that context — ``rumps.notification`` is the
-# documented example (see ``notifier.py``), and ``NSAlert.runModal`` /
-# ``rumps.Window.run`` behave similarly: the call appears to start, but
-# AppKit silently marks the process as misbehaving and ``launchd``
-# tears it down a few seconds later. There's no crash report, just a
-# clean exit and a relaunch — which from the user's perspective looks
-# like "the menu went dead and nothing happened".
+# When launched from launchd via the ``Glucose Menubar.app`` wrapper
+# bundle (see ``scripts/app_bundle/``), AppKit sees a real
+# ``CFBundleIdentifier`` and ``LSUIElement`` and modal dialogs work
+# correctly — so we show a single ``NSAlert`` with a two-field
+# accessory view for credentials, which is the UX the user asked for.
 #
-# ``osascript`` shells out to a properly bundled helper process
-# (``System Events``) to host the dialog, so this works regardless of
-# how our own process was launched. It's also the fallback the
-# notification backend in ``notifier.py`` already uses, for the same
-# underlying reason.
+# When running unbundled (e.g. ``python -m macos_frontend`` from a
+# terminal during development), the Python process has no bundle
+# identity. Several AppKit UI APIs refuse to work in that context —
+# ``rumps.notification`` is the documented example (see
+# ``notifier.py``), and ``NSAlert.runModal`` / ``rumps.Window.run``
+# behave similarly: the call appears to start, but AppKit silently
+# marks the process as misbehaving and ``launchd`` tears it down a
+# few seconds later. There's no crash report, just a clean exit and a
+# relaunch — which from the user's perspective looks like "the menu
+# went dead and nothing happened". In that mode we fall back to
+# ``osascript``, which shells out to a properly bundled helper
+# process (``System Events``) to host the dialog. That's also the
+# fallback the notification backend uses, for the same reason.
 #
-# Running the osascript subprocess on the main thread would block the
-# rumps runloop for the whole time the dialog is up, freezing the
-# menubar title. So the whole dialog flow runs on a background thread.
-# Subprocess + keychain writes are safe off the main thread; the only
-# thing that strictly isn't is UI mutation, and the next poll tick
-# (which rumps drives on the main thread) picks up state changes.
+# Either way, the dialog flow runs on a background thread so the
+# rumps menu callback returns immediately (otherwise the menu stays
+# wedged in its tracking session). The native-NSAlert path uses
+# ``performSelectorOnMainThread:`` to marshal the actual UI call back
+# to the main thread.
 
 
 def _applescript_escape(s: str) -> str:
@@ -172,6 +184,168 @@ def _run_in_background(fn) -> None:
             log.exception("Background menu handler failed")
 
     threading.Thread(target=_target, daemon=True).start()
+
+
+# --- bundled-mode detection ------------------------------------------------
+#
+# When launched via the ``Glucose Menubar.app`` wrapper bundle, AppKit sees
+# a real ``CFBundleIdentifier`` and ``NSAlert.runModal()`` works correctly.
+# When launched directly (``python -m macos_frontend`` during development),
+# the same calls can silently tear down the process — so we fall back to
+# the osascript two-dialog flow.
+
+_BUNDLE_ID = "com.glucose-display.frontend"
+
+
+def _is_bundled() -> bool:
+    try:
+        bid = NSBundle.mainBundle().bundleIdentifier()
+    except Exception:  # noqa: BLE001
+        return False
+    return bid == _BUNDLE_ID
+
+
+# --- main-thread dispatch --------------------------------------------------
+#
+# AppKit UI calls (NSAlert.runModal, NSApp.activateIgnoringOtherApps_, etc.)
+# must happen on the main thread. The dialog flow runs on a background
+# thread (so the rumps menu callback returns immediately and the menu
+# doesn't stay wedged in its tracking session), so we need a way to ask
+# the main thread to run a block and wait for it.
+#
+# ``performSelectorOnMainThread:withObject:waitUntilDone:`` is the
+# blessed PyObjC idiom for this — NSRunLoop processes the selector in
+# ``NSDefaultRunLoopMode`` as soon as the menu tracking ends.
+
+
+class _MainThreadRunner(NSObject):
+    """Objective-C proxy that invokes a Python callable on the main thread."""
+
+    def initWithCallable_(self, fn):  # noqa: N802  - Obj-C naming.
+        self = objc.super(_MainThreadRunner, self).init()
+        if self is None:
+            return None
+        self._fn = fn
+        self._result = None
+        self._error: BaseException | None = None
+        return self
+
+    def run_(self, _sender):  # noqa: N802  - Obj-C selector name.
+        try:
+            self._result = self._fn()
+        except BaseException as e:  # noqa: BLE001
+            self._error = e
+
+
+def _run_on_main_and_wait(fn):
+    """Run ``fn()`` on the main thread, block until it returns, and return its value.
+
+    Exceptions raised by ``fn`` are re-raised on the caller's thread.
+    """
+    runner = _MainThreadRunner.alloc().initWithCallable_(fn)
+    runner.performSelectorOnMainThread_withObject_waitUntilDone_(
+        "run:", None, True
+    )
+    if runner._error is not None:
+        raise runner._error
+    return runner._result
+
+
+# --- native two-field credentials dialog -----------------------------------
+
+
+def _native_credentials_dialog(
+    *,
+    current_email: str = "",
+) -> tuple[bool, str, str]:
+    """Show a single NSAlert with email + password fields.
+
+    Returns ``(clicked_ok, email, password)``. Must run on the main
+    thread — dispatch via :func:`_run_on_main_and_wait` from worker
+    threads.
+    """
+    alert = NSAlert.alloc().init()
+    alert.setMessageText_("Update LibreLinkUp Credentials")
+    alert.setInformativeText_(
+        "Email and password are stored in the macOS Keychain, not on disk."
+    )
+    alert.addButtonWithTitle_("Save")
+    alert.addButtonWithTitle_("Cancel")
+
+    # 300×22 is the standard NSTextField height macOS uses in alert
+    # accessory views; anything smaller clips the baseline of the caret.
+    row_width, row_height = 300, 22
+    email_field = NSTextField.alloc().initWithFrame_(
+        NSMakeRect(0, 0, row_width, row_height)
+    )
+    email_field.setPlaceholderString_("email@example.com")
+    email_field.setStringValue_(current_email)
+    password_field = NSSecureTextField.alloc().initWithFrame_(
+        NSMakeRect(0, 0, row_width, row_height)
+    )
+    password_field.setPlaceholderString_("password")
+
+    stack = NSStackView.alloc().initWithFrame_(
+        NSMakeRect(0, 0, row_width, row_height * 2 + 8)
+    )
+    stack.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
+    stack.setSpacing_(8.0)
+    stack.addArrangedSubview_(email_field)
+    stack.addArrangedSubview_(password_field)
+    # Pin each field to the stack's full width so they don't collapse
+    # to their intrinsic zero-width content size.
+    email_field.setTranslatesAutoresizingMaskIntoConstraints_(False)
+    password_field.setTranslatesAutoresizingMaskIntoConstraints_(False)
+    email_field.widthAnchor().constraintEqualToConstant_(row_width).setActive_(True)
+    password_field.widthAnchor().constraintEqualToConstant_(row_width).setActive_(True)
+
+    alert.setAccessoryView_(stack)
+    # Focus the empty field so typing starts in the right place.
+    alert.window().setInitialFirstResponder_(
+        password_field if current_email else email_field
+    )
+
+    try:
+        NSApp.activateIgnoringOtherApps_(True)
+    except Exception:  # noqa: BLE001
+        pass
+
+    response = alert.runModal()
+    ok = response == NSAlertFirstButtonReturn
+    return (ok, email_field.stringValue() or "", password_field.stringValue() or "")
+
+
+def _native_single_field_dialog(
+    *,
+    title: str,
+    message: str,
+    default_text: str = "",
+    ok_label: str = "OK",
+    cancel_label: str = "Cancel",
+) -> tuple[bool, str]:
+    """Show a native NSAlert with a single text field. Main-thread only."""
+    alert = NSAlert.alloc().init()
+    alert.setMessageText_(title)
+    alert.setInformativeText_(message)
+    alert.addButtonWithTitle_(ok_label)
+    alert.addButtonWithTitle_(cancel_label)
+
+    row_width, row_height = 300, 22
+    field = NSTextField.alloc().initWithFrame_(
+        NSMakeRect(0, 0, row_width, row_height)
+    )
+    field.setStringValue_(default_text)
+    alert.setAccessoryView_(field)
+    alert.window().setInitialFirstResponder_(field)
+
+    try:
+        NSApp.activateIgnoringOtherApps_(True)
+    except Exception:  # noqa: BLE001
+        pass
+
+    response = alert.runModal()
+    ok = response == NSAlertFirstButtonReturn
+    return (ok, field.stringValue() or "")
 
 
 # Map daemon Status values to a single-character / short-text menubar title
@@ -442,8 +616,8 @@ class GlucoseApp(rumps.App):
     def _on_toggle_notifications(self, sender) -> None:
         if self._notifier is None:
             _run_in_background(
-                lambda: _osascript_alert(
-                    title="Notifications unavailable",
+                lambda: self._show_alert(
+                    title="Notifications Unavailable",
                     message="Notifier was not initialised. Restart the frontend.",
                 )
             )
@@ -459,32 +633,33 @@ class GlucoseApp(rumps.App):
         _run_in_background(self._edit_credentials_impl)
 
     def _edit_credentials_impl(self) -> None:
-        """Capture email + password with two dialogs and save to Keychain."""
-        ok, email = _osascript_dialog(
-            title="LibreLinkUp Email",
-            message="Enter the email associated with your LibreLinkUp account.",
-            ok="Next",
-        )
+        """Capture email + password and save to Keychain.
+
+        When running inside the ``Glucose Menubar.app`` wrapper bundle
+        we show a single native NSAlert with two fields. When running
+        unbundled (``python -m macos_frontend`` during development),
+        AppKit modals can tear the process down, so we fall back to
+        the osascript two-dialog flow which delegates UI to a properly
+        bundled helper process.
+        """
+        if _is_bundled():
+            ok, email, password = _run_on_main_and_wait(
+                lambda: _native_credentials_dialog()
+            )
+        else:
+            ok, email, password = self._osascript_credentials_prompt()
         if not ok:
             return
+
         email = email.strip()
         if not email:
-            _osascript_alert(
+            self._show_alert(
                 title="Email Required",
                 message="You didn't enter an email. Try Update Credentials… again.",
             )
             return
-
-        ok, password = _osascript_dialog(
-            title="LibreLinkUp Password",
-            message="Password is stored in the macOS Keychain, not on disk.",
-            ok="Save",
-            hidden_answer=True,
-        )
-        if not ok:
-            return
         if not password:
-            _osascript_alert(
+            self._show_alert(
                 title="Password Required",
                 message="You didn't enter a password. Try Update Credentials… again.",
             )
@@ -493,12 +668,12 @@ class GlucoseApp(rumps.App):
         try:
             save_credentials(email=email, password=password)
         except Exception as e:  # noqa: BLE001
-            _osascript_alert(
+            self._show_alert(
                 title="Could Not Save Credentials",
                 message=f"{e}\n\nYou can still set LIBRELINKUP_EMAIL/_PASSWORD in .env.",
             )
             return
-        _osascript_alert(
+        self._show_alert(
             title="Credentials Saved",
             message=(
                 f"Stored under Keychain service '{KEYCHAIN_SERVICE}'. "
@@ -506,29 +681,79 @@ class GlucoseApp(rumps.App):
             ),
         )
 
+    def _osascript_credentials_prompt(self) -> tuple[bool, str, str]:
+        """Unbundled-mode fallback: two sequential osascript dialogs."""
+        ok, email = _osascript_dialog(
+            title="LibreLinkUp Email",
+            message="Enter the email associated with your LibreLinkUp account.",
+            ok="Next",
+        )
+        if not ok:
+            return False, "", ""
+        ok, password = _osascript_dialog(
+            title="LibreLinkUp Password",
+            message="Password is stored in the macOS Keychain, not on disk.",
+            ok="Save",
+            hidden_answer=True,
+        )
+        if not ok:
+            return False, "", ""
+        return True, email, password
+
+    def _show_alert(self, *, title: str, message: str) -> None:
+        """Show an informational alert, using whichever backend fits the mode."""
+        if _is_bundled():
+            def _impl() -> None:
+                alert = NSAlert.alloc().init()
+                alert.setMessageText_(title)
+                alert.setInformativeText_(message)
+                alert.addButtonWithTitle_("OK")
+                try:
+                    NSApp.activateIgnoringOtherApps_(True)
+                except Exception:  # noqa: BLE001
+                    pass
+                alert.runModal()
+
+            _run_on_main_and_wait(_impl)
+        else:
+            _osascript_alert(title=title, message=message)
+
     def _on_edit_thresholds(self, _sender) -> None:
         log.info("Set thresholds clicked")
         _run_in_background(self._edit_thresholds_impl)
 
     def _edit_thresholds_impl(self) -> None:
         """Prompt for the three colour thresholds. Session-only; see below."""
-        ok, response = _osascript_dialog(
-            title="Glucose Thresholds (mg/dL)",
-            message=(
-                "Three numbers separated by commas: low, high, very_high.\n"
-                f"Current: {int(self.thresholds.low)}, "
-                f"{int(self.thresholds.high)}, "
-                f"{int(self.thresholds.very_high)}.\n\n"
-                "To persist across restarts, set THRESHOLD_LOW_MG_DL, "
-                "THRESHOLD_HIGH_MG_DL, THRESHOLD_VERY_HIGH_MG_DL in .env."
-            ),
-            default_text=(
-                f"{int(self.thresholds.low)},"
-                f"{int(self.thresholds.high)},"
-                f"{int(self.thresholds.very_high)}"
-            ),
-            ok="Apply",
+        default_text = (
+            f"{int(self.thresholds.low)},"
+            f"{int(self.thresholds.high)},"
+            f"{int(self.thresholds.very_high)}"
         )
+        message = (
+            "Three numbers separated by commas: low, high, very_high.\n"
+            f"Current: {int(self.thresholds.low)}, "
+            f"{int(self.thresholds.high)}, "
+            f"{int(self.thresholds.very_high)}.\n\n"
+            "To persist across restarts, set THRESHOLD_LOW_MG_DL, "
+            "THRESHOLD_HIGH_MG_DL, THRESHOLD_VERY_HIGH_MG_DL in .env."
+        )
+
+        if _is_bundled():
+            ok, response = _run_on_main_and_wait(
+                lambda: _native_single_field_dialog(
+                    title="Glucose Thresholds (mg/dL)",
+                    message=message,
+                    default_text=default_text,
+                    ok_label="Apply",
+                )
+            )
+        else:
+            ok, response = _osascript_dialog(
+                title="Glucose Thresholds (mg/dL)",
+                message=message,
+                default_text=default_text,
+                ok="Apply",
+            )
         if not ok:
             return
         try:
@@ -539,7 +764,7 @@ class GlucoseApp(rumps.App):
             if not (low < high < very_high):
                 raise ValueError("must satisfy low < high < very_high")
         except Exception as e:  # noqa: BLE001
-            _osascript_alert(title="Invalid Thresholds", message=str(e))
+            self._show_alert(title="Invalid Thresholds", message=str(e))
             return
 
         # Mutating shared state from a worker thread: the frontend is

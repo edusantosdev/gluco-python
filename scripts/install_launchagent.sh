@@ -28,6 +28,17 @@ FRONTEND_PLIST="${LA_DIR}/${FRONTEND_LABEL}.plist"
 DAEMON_TMPL="${REPO_ROOT}/scripts/launchagents/${DAEMON_LABEL}.plist.tmpl"
 FRONTEND_TMPL="${REPO_ROOT}/scripts/launchagents/${FRONTEND_LABEL}.plist.tmpl"
 
+# The frontend runs out of a thin .app bundle so AppKit sees a proper
+# CFBundleIdentifier / LSUIElement. See scripts/app_bundle/Info.plist.tmpl
+# for the full explanation.
+APP_BUNDLE_SRC="${REPO_ROOT}/scripts/app_bundle"
+APP_BUNDLE_DST="${REPO_ROOT}/build/Glucose Menubar.app"
+# ``APP_EXECUTABLE`` is the symlinked Python inside the bundle; launchd
+# runs it with ``-m macos_frontend``. ``APP_LAUNCHER`` is the shell-script
+# alternative kept for dev / debugging.
+APP_EXECUTABLE="${APP_BUNDLE_DST}/Contents/MacOS/Glucose Menubar"
+APP_LAUNCHER="${APP_BUNDLE_DST}/Contents/MacOS/launcher"
+
 GUI_DOMAIN="gui/$(id -u)"
 
 render_plist() {
@@ -36,9 +47,82 @@ render_plist() {
         -e "s|__VENV_PYTHON__|${VENV_PYTHON}|g" \
         -e "s|__REPO_ROOT__|${REPO_ROOT}|g" \
         -e "s|__STATE_DIR__|${STATE_DIR}|g" \
+        -e "s|__APP_EXECUTABLE__|${APP_EXECUTABLE}|g" \
         "${tmpl}" > "${dest}"
     # plutil verifies well-formedness; bail early if we produced bad XML.
     plutil -lint "${dest}" >/dev/null
+}
+
+build_app_bundle() {
+    # The bundle is a self-contained "virtual venv" around the real
+    # .venv so that when the Python interpreter launches from inside
+    # ``Contents/MacOS/``, both of the following are true:
+    #
+    #   1. ``NSBundle.mainBundle()`` resolves to the .app, by walking
+    #      up from the executable path and finding ``Contents/Info.plist``.
+    #      This is what gives AppKit our ``CFBundleIdentifier`` and
+    #      ``LSUIElement`` (fixes the dialog-crash loop).
+    #
+    #   2. Python still picks up the real venv's ``site-packages`` (so
+    #      ``rumps``, ``httpx``, ``pyobjc`` etc. are importable). CPython
+    #      looks for ``pyvenv.cfg`` one directory above the executable,
+    #      then uses ``sys.prefix = <that dir>`` for site-packages
+    #      discovery. So we place ``pyvenv.cfg`` at ``Contents/`` and
+    #      symlink ``Contents/lib/python*/site-packages`` into the real
+    #      venv.
+    #
+    # Layout produced here:
+    #
+    #   Glucose Menubar.app/
+    #     Contents/
+    #       Info.plist
+    #       pyvenv.cfg                       (copy of .venv/pyvenv.cfg)
+    #       lib/python3.x/site-packages/     (symlink → .venv/...)
+    #       MacOS/
+    #         Glucose Menubar                (symlink → .venv/bin/python)
+    #         launcher                       (kept for dev convenience)
+    local contents="${APP_BUNDLE_DST}/Contents"
+    local macos="${contents}/MacOS"
+    mkdir -p "${macos}" "${contents}/Resources"
+
+    sed \
+        -e "s|__VENV_PYTHON__|${VENV_PYTHON}|g" \
+        -e "s|__REPO_ROOT__|${REPO_ROOT}|g" \
+        "${APP_BUNDLE_SRC}/Info.plist.tmpl" > "${contents}/Info.plist"
+    plutil -lint "${contents}/Info.plist" >/dev/null
+
+    # launcher.sh is kept around so you can invoke the frontend by
+    # running the shell script directly during development. launchd
+    # uses the symlinked Python executable instead (see below).
+    sed \
+        -e "s|__VENV_PYTHON__|${VENV_PYTHON}|g" \
+        -e "s|__REPO_ROOT__|${REPO_ROOT}|g" \
+        "${APP_BUNDLE_SRC}/launcher.tmpl" > "${APP_LAUNCHER}"
+    chmod +x "${APP_LAUNCHER}"
+
+    # ``CFBundleExecutable`` in Info.plist is ``Glucose Menubar``; this
+    # symlink is what launchd actually execs, and what Python sees as
+    # its own executable path.
+    ln -sfn "${VENV_PYTHON}" "${macos}/Glucose Menubar"
+
+    # Copy pyvenv.cfg so Python's venv site-packages discovery finds
+    # it when launched from ``Contents/MacOS/``. We copy instead of
+    # symlinking because the file is tiny and it keeps the bundle
+    # self-describing.
+    cp "${REPO_ROOT}/.venv/pyvenv.cfg" "${contents}/pyvenv.cfg"
+
+    # Symlink site-packages so all installed deps are visible.
+    local py_version
+    py_version=$("${VENV_PYTHON}" -c 'import sys; print(f"python{sys.version_info.major}.{sys.version_info.minor}")')
+    local sp_parent="${contents}/lib/${py_version}"
+    mkdir -p "${sp_parent}"
+    ln -sfn "${REPO_ROOT}/.venv/lib/${py_version}/site-packages" "${sp_parent}/site-packages"
+
+    # Register the new bundle with Launch Services so macOS knows
+    # about the CFBundleIdentifier / LSUIElement. Without this, the
+    # first launch can still be treated as unbundled.
+    /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister \
+        -f "${APP_BUNDLE_DST}" >/dev/null 2>&1 || true
 }
 
 cmd_install() {
@@ -52,6 +136,10 @@ cmd_install() {
     echo >&2 "Only one process may hold ${STATE_DIR}/daemon.lock — otherwise"
     echo >&2 "this LaunchAgent will fail with 'Another glucose daemon is already running'."
     mkdir -p "${LA_DIR}" "${STATE_DIR}"
+
+    # The frontend plist points at the launcher *inside* the bundle,
+    # so the bundle has to exist before we bootstrap.
+    build_app_bundle
 
     render_plist "${DAEMON_TMPL}" "${DAEMON_PLIST}"
     render_plist "${FRONTEND_TMPL}" "${FRONTEND_PLIST}"

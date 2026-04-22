@@ -143,15 +143,25 @@ Two LaunchAgents (daemon + frontend) start both on login, auto-restart
 on crash, and log to `~/.glucose-display/launchd.*.log`.
 
 ```bash
-scripts/install_launchagent.sh install     # render templates + bootstrap
+scripts/install_launchagent.sh install     # build .app, render plists, bootstrap
 scripts/install_launchagent.sh status      # running / not loaded
 scripts/install_launchagent.sh logs        # tail launchd logs
 scripts/install_launchagent.sh uninstall   # bootout + remove plists
 ```
 
-Templates under `scripts/launchagents/` use `__VENV_PYTHON__`,
-`__REPO_ROOT__`, and `__STATE_DIR__` placeholders substituted at install
-time (launchd has no useful `$PATH`).
+The installer builds a thin `build/Glucose Menubar.app` wrapper bundle
+(symlinks to the real venv — no py2app, no rebundle-on-every-edit loop)
+and points the frontend LaunchAgent at its `Contents/MacOS/Glucose Menubar`
+executable. The bundle gives AppKit a real `CFBundleIdentifier` and
+`LSUIElement`, which is what lets us show native dialogs (e.g. the
+single-window **Update credentials…** form) and notifications. When
+running directly via `python -m macos_frontend` from a terminal, the
+app detects the missing bundle and falls back to AppleScript dialogs.
+
+Templates under `scripts/launchagents/` and `scripts/app_bundle/` use
+`__VENV_PYTHON__`, `__REPO_ROOT__`, `__STATE_DIR__`, and
+`__APP_EXECUTABLE__` placeholders substituted at install time (launchd
+has no useful `$PATH`).
 
 ## Troubleshooting
 
@@ -203,9 +213,13 @@ if it still hangs, file an issue with your macOS version.
   `warming_up`, not a network error.
 - **Logs:** `~/.glucose-display/daemon.log` (1 MB × 3 backups).
   `SIGTERM`/`SIGINT` exit cleanly (`Poller stopped` line in the log).
-- **Packaging:** if you bundle the frontend as a `.app`, set
-  `LSUIElement=1` in `Info.plist` or you get a stray Dock icon. Not
-  needed when running `python -m macos_frontend` directly.
+- **Packaging:** `scripts/install_launchagent.sh install` builds a
+  `build/Glucose Menubar.app` wrapper bundle that symlinks the real
+  venv — no py2app, no rebundle-on-every-edit loop. The bundle gives
+  AppKit a real `CFBundleIdentifier` + `LSUIElement`, which is what
+  lets us show native modal dialogs and notifications. Running
+  `python -m macos_frontend` directly skips the bundle and falls back
+  to AppleScript dialogs.
 
 Run the test suite:
 
@@ -220,6 +234,8 @@ Phase 5 (Linux port) pending.
 
 ## Deliberate non-goals
 
-- Bundling / notarising a `.app` — personal use, runs from source.
+- Notarising / codesigning the `.app` — personal use, and the bundle
+  is a thin wrapper around the repo's venv rather than a shippable
+  artifact.
 - Linux port — tracked in the
   [implementation plan](./glucose-menubar-implementation-plan.md).
