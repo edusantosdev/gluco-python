@@ -2,6 +2,17 @@
 
 This plan is based on the current codebase state (daemon + `macos_frontend`, including graph support via `/glucose/graph` and `macos_frontend/graph_view.py`).
 
+## Plasma Compatibility Target
+
+Primary support target is **KDE Plasma 6 (latest stable)** on Fedora KDE spins, with **Wayland as the default session**.
+
+Compatibility baseline to enforce during implementation:
+
+- Fedora KDE latest two stable releases (rolling target).
+- Plasma 6.x latest point release on those Fedora versions.
+- Qt 6 / PySide6 stack only (no new Qt5 dependency path).
+- Working behavior on both Wayland and X11 sessions, but Wayland is the release gate.
+
 ## 1) Goal and Scope
 
 Deliver a Linux desktop frontend that runs well on Fedora KDE Plasma while reusing the existing daemon contract and operational behavior.
@@ -54,6 +65,10 @@ Why:
 - Built-in dialogs and drawing primitives for a menu graph replacement.
 - Good long-term maintainability for a desktop app.
 
+Plasma-latest requirement:
+
+- Keep the Linux frontend strictly on Qt6 APIs so it tracks Plasma 6 conventions and avoids Qt5 tray edge cases.
+
 ### 3.2 Process model
 
 Keep the same 2-process model:
@@ -70,6 +85,11 @@ Recommendation for first pass:
 
 - `systemd --user` for daemon.
 - `.desktop` autostart for frontend (simpler and robust for GUI startup timing).
+
+Plasma-latest guardrails:
+
+- Add `X-KDE-autostart-after=panel` in the autostart template to reduce race conditions where the tray host is not ready yet.
+- Ensure tray availability check at startup (`QSystemTrayIcon.isSystemTrayAvailable()`), with retry/backoff before showing hard failure.
 
 ## 4) Phased Implementation
 
@@ -149,12 +169,15 @@ KDE-specific implementation notes:
   - primary: concise tooltip + first menu line for value/status
   - optional: generate icon badges for numeric value if needed later
 - Keep polling interval behavior consistent with current `FRONTEND_POLL_SECONDS`.
+- Prefer symbolic SVG icons that adapt to Plasma light/dark themes.
+- Do not rely on legacy StatusNotifier behaviors that are KDE4/Qt5-era only.
 
 Acceptance:
 
 - Linux frontend launches on Fedora KDE and updates every poll tick.
 - Menu actions trigger same daemon endpoints as macOS frontend.
 - No daemon contract changes required.
+- Verified on latest Plasma 6.x Wayland session before release is considered done.
 
 ## Phase 3 - Linux notifications and credentials UX
 
@@ -203,6 +226,7 @@ Frontend autostart entry should include:
 
 - `Exec=<venv>/python -m linux_frontend`
 - `OnlyShowIn=KDE;`
+- `X-KDE-autostart-after=panel`
 
 Acceptance:
 
@@ -269,11 +293,14 @@ Acceptance:
 - Dependency bloat from Qt:
   - Mitigation: keep Qt in Linux extra, not base install.
 
-## 7) Validation Matrix (Fedora KDE)
+## 7) Validation Matrix (Fedora KDE, Plasma Latest)
 
 Minimum manual validation:
 
-- Fedora 40/41+ with KDE Plasma, both Wayland and X11 session if possible.
+- Fedora KDE latest two releases (e.g., current stable and previous stable), each on latest available Plasma 6.x.
+- Session coverage:
+  - Wayland (required pass)
+  - X11 (best-effort compatibility pass)
 - Fresh boot/login:
   - daemon started
   - frontend visible
@@ -285,6 +312,11 @@ Minimum manual validation:
 - Graph checks:
   - data appears after successful polls
   - empty state shown cleanly when history unavailable
+- Theme checks:
+  - Breeze light and dark theme
+  - tray icon and graph remain legible in both themes
+- Desktop shell checks:
+  - panel restart (`plasmashell --replace`) does not require app restart for tray recovery
 
 ## 8) Suggested Delivery Order (Practical)
 
@@ -307,4 +339,14 @@ Assuming familiarity with Qt/PySide and no major environment surprises:
 - Install/docs/QA: 0.5-1 day
 
 Total: roughly **3-6 focused days** for a polished Fedora KDE-first implementation.
+
+## 10) Definition of Done for Plasma Latest
+
+The Linux port is considered complete for KDE support only when all are true:
+
+- Passes validation on Fedora KDE latest two stable releases.
+- Passes on latest Plasma 6.x Wayland session (mandatory).
+- No Qt5-only dependencies in Linux path.
+- Tray icon, notifications, credentials dialog, thresholds dialog, and graph are all functional after login autostart.
+- README documents the supported Plasma/Fedora window and known limitations.
 
