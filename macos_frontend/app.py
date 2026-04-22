@@ -24,6 +24,7 @@ from pathlib import Path
 
 import objc
 import rumps
+from rumps import events as rumps_events
 from AppKit import (
     NSAlert,
     NSAlertFirstButtonReturn,
@@ -36,12 +37,13 @@ from AppKit import (
     NSMakeRect,
     NSMutableAttributedString,
     NSSecureTextField,
+    NSStringDrawingUsesLineFragmentOrigin,
     NSStackView,
     NSTextField,
     NSUserInterfaceLayoutOrientationVertical,
 )
 from dotenv import load_dotenv
-from Foundation import NSBundle, NSObject
+from Foundation import NSBundle, NSMinY, NSObject, NSPoint, NSString
 
 # Allow ``python -m macos_frontend`` and ``python macos_frontend/app.py``.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -68,6 +70,59 @@ from macos_frontend.notifier import NotificationPolicy, Notifier  # noqa: E402
 _GRAPH_HOURS = 8
 _GRAPH_WIDTH = 320
 _GRAPH_HEIGHT = 110
+# Horizontal tweak for status-menu popup (negative = left); see ``_StatusItemMenuPresenter``.
+_MENU_POPUP_X_NUDGE_PT = -2.0
+# Used to measure ``NSAttributedString`` breadth for menu alignment (wide max, single line).
+_MENU_TITLE_MEASURE_SIZE = (2000.0, 500.0)
+
+
+def _ns_utf16_len(s: str) -> int:
+    """Cocoa string length in UTF-16 code units (``NSRange`` indexing)."""
+    return int(NSString.stringWithString_(s).length())
+
+
+def _attributed_title_breadth(attr) -> float:
+    """Horizontal span of ``attr`` for layout (same font as menubar title)."""
+    if attr is None or attr.length() == 0:
+        return 0.0
+    rect = attr.boundingRectWithSize_options_(
+        _MENU_TITLE_MEASURE_SIZE,
+        NSStringDrawingUsesLineFragmentOrigin,
+    )
+    return float(rect.size.width)
+
+
+def _value_center_x_in_status_button(button, app: "GlucoseApp") -> float:
+    """Horizontal center of the value run in ``button`` coordinates.
+
+    Assumes the menubar title is one left-to-right line ``value + arrow + trailing``
+    centered as a whole in the status bar button. Uses the live
+    ``attributedTitle()`` so digit count (``90`` vs ``105``), font, and kerning
+    match what is drawn; falls back to plain ``NSString`` sizing when there is
+    no attributed title yet.
+    """
+    bw = float(button.bounds().size.width)
+    value = app._title_value
+    suffix = f"{app._title_arrow}{app._title_trailing}"
+    attr = button.attributedTitle()
+    if attr is not None and attr.length() > 0:
+        full_w = _attributed_title_breadth(attr)
+        vlen = _ns_utf16_len(value) if value else 0
+        vlen = min(vlen, attr.length())
+        value_w = _attributed_title_breadth(
+            attr.attributedSubstringFromRange_((0, vlen))
+        )
+    else:
+        font = NSFont.menuBarFontOfSize_(0)
+        attrs = {NSFontAttributeName: font}
+        full = f"{value}{suffix}"
+        full_w = float(NSString.stringWithString_(full).sizeWithAttributes_(attrs).width)
+        value_w = (
+            float(NSString.stringWithString_(value).sizeWithAttributes_(attrs).width)
+            if value
+            else 0.0
+        )
+    return (bw - full_w) / 2.0 + value_w / 2.0
 
 # Title pulse animation. The value and arrow gently fade together on a
 # shared cosine curve whenever the reading's trend is directional
@@ -535,6 +590,41 @@ _DETAIL_TEXT = {
 }
 
 
+class _StatusItemMenuPresenter(NSObject):
+    """Pops up the main ``NSMenu`` so it lines up under the glucose value.
+
+    rumps attaches the menu with ``NSStatusItem.setMenu:``, which anchors the
+    panel to the trailing edge of the pill and looks visually disconnected from
+    the number. We clear that menu, handle the button action, and call
+    ``popUpMenuPositioningItem:atLocation:inView:`` with an x derived from the
+    button's live ``attributedTitle()`` (or the same strings + menubar font) so
+    the anchor moves when the digit count or trend suffix changes.
+    """
+
+    def initWithGlucoseApp_(self, app: "GlucoseApp"):
+        self = objc.super(_StatusItemMenuPresenter, self).init()
+        if self is None:
+            return None
+        self._glucose_app = app
+        return self
+
+    def showGlucoseMenu_(self, sender):
+        app = self._glucose_app
+        ns_menu = app._menu._menu
+        button = sender
+        ns_menu.sizeToFit()
+        menu_w = float(ns_menu.size().width)
+        value_center_x = _value_center_x_in_status_button(button, app)
+        x = value_center_x - menu_w / 2.0 + _MENU_POPUP_X_NUDGE_PT
+        bw = float(button.bounds().size.width)
+        if menu_w <= bw:
+            x = max(0.0, min(x, bw - menu_w))
+        else:
+            x = max(0.0, x)
+        loc = NSPoint(x, NSMinY(button.bounds()))
+        ns_menu.popUpMenuPositioningItem_atLocation_inView_(None, loc, button)
+
+
 class GlucoseApp(rumps.App):
     def __init__(
         self,
@@ -612,8 +702,20 @@ class GlucoseApp(rumps.App):
         self._arrow_pulse_timer = rumps.Timer(
             self._on_arrow_pulse_tick, _PULSE_TICK_S
         )
+        self._status_menu_presenter = _StatusItemMenuPresenter.alloc().initWithGlucoseApp_(self)
+        rumps_events.before_start.register(self._install_number_aligned_status_menu)
         self._timer.start()
         self._on_tick(None)
+
+    def _install_number_aligned_status_menu(self, *_unused) -> None:
+        delegate = self._nsapp
+        item = delegate.nsstatusitem
+        item.setMenu_(None)
+        button = item.button()
+        if button is None:
+            return
+        button.setTarget_(self._status_menu_presenter)
+        button.setAction_("showGlucoseMenu:")
 
     # --- title rendering ---
 
