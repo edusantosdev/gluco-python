@@ -430,7 +430,7 @@ def _reading_menu_labels(reading: CurrentReading) -> tuple[str, str]:
     """Two menu rows: freshness (with sample clock in parens) and display units."""
     if reading.status in ("ok", "stale"):
         local_hhmm = _to_local_hhmm(reading.sensor_timestamp)
-        age = _humanize_age(reading.reading_age_seconds).lower()
+        age = _humanize_age(reading.reading_age_seconds)
         unit = reading.unit or ""
         if local_hhmm != "—":
             updated_line = f"Updated: {age} at {local_hhmm}"
