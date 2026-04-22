@@ -61,17 +61,14 @@ Run only one side:
 
 ## Daily Commands
 
-```bash
-# Re-apply LaunchAgent config and restart both jobs (use after code or .env changes,
-# or to rebuild build/Glucose Menubar.app after recreating the venv)
-scripts/install_launchagent.sh install
+`scripts/install_launchagent.sh install` re-applies the LaunchAgent plists, rebuilds `build/Glucose Menubar.app` when needed, and restarts both jobs—use it after code or `.env` changes, or after recreating the venv.
 
-# Unregister both LaunchAgents: stops launchd from auto-starting or restarting them,
-# and removes the plist files from ~/Library/LaunchAgents/. Run daemon/menubar manually
-# if you still need them, or reinstall later with install.
+`scripts/install_launchagent.sh uninstall` unregisters both LaunchAgents so `launchd` stops auto-starting and restarting them, removes the plist files from `~/Library/LaunchAgents/`, and leaves you to start the daemon and menubar yourself if you still need them or to run `install` again when you want `launchd` to manage them.
+
+```bash
+scripts/install_launchagent.sh install
 scripts/install_launchagent.sh uninstall
 
-# Probe daemon API
 curl -s http://127.0.0.1:8765/glucose/current | jq
 curl -s -X POST http://127.0.0.1:8765/auth/refresh | jq
 ```
