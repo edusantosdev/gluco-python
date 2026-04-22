@@ -450,14 +450,14 @@ def _humanize_age(age_seconds: int | None) -> str:
         return "Unknown"
     if age_seconds < 0:
         # Clock skew or bad payload timestamp; avoid showing confusing negatives.
-        return "Just Now"
+        return "Just now"
     if age_seconds < 60:
-        return "Just Now"
+        return "Just now"
     minutes = age_seconds // 60
     if minutes < 60:
-        return "1 Min Ago" if minutes == 1 else f"{minutes} Min Ago"
+        return "1 min ago" if minutes == 1 else f"{minutes} min ago"
     hours = minutes // 60
-    return "1 Hour Ago" if hours == 1 else f"{hours} Hours Ago"
+    return "1 hour ago" if hours == 1 else f"{hours} hours ago"
 
 
 def _to_local_hhmm(timestamp_iso: str | None) -> str:
