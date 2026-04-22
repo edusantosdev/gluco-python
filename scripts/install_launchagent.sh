@@ -41,6 +41,24 @@ APP_EXECUTABLE="${APP_BUNDLE_DST}/Contents/MacOS/Glucose Menubar"
 
 GUI_DOMAIN="gui/$(id -u)"
 
+bootout_agent() {
+    local label="$1" plist="$2"
+    # Remove by both label and plist path. Depending on launchd's current
+    # bookkeeping, one form may succeed while the other reports "not found".
+    launchctl bootout "${GUI_DOMAIN}/${label}" 2>/dev/null || true
+    launchctl bootout "${GUI_DOMAIN}" "${plist}" 2>/dev/null || true
+}
+
+bootstrap_agent() {
+    local label="$1" plist="$2"
+    if launchctl bootstrap "${GUI_DOMAIN}" "${plist}"; then
+        return 0
+    fi
+    echo "warn: bootstrap failed for ${label}; retrying after forced bootout" >&2
+    bootout_agent "${label}" "${plist}"
+    launchctl bootstrap "${GUI_DOMAIN}" "${plist}"
+}
+
 render_plist() {
     local tmpl="$1" dest="$2"
     sed \
@@ -140,10 +158,10 @@ cmd_install() {
     # "bootstrap" is the modern replacement for "load". It's a no-op if
     # the label is already loaded, so we unload first to pick up template
     # changes (path moves, env var additions, etc.).
-    launchctl bootout "${GUI_DOMAIN}/${DAEMON_LABEL}"   2>/dev/null || true
-    launchctl bootout "${GUI_DOMAIN}/${FRONTEND_LABEL}" 2>/dev/null || true
-    launchctl bootstrap "${GUI_DOMAIN}" "${DAEMON_PLIST}"
-    launchctl bootstrap "${GUI_DOMAIN}" "${FRONTEND_PLIST}"
+    bootout_agent "${DAEMON_LABEL}" "${DAEMON_PLIST}"
+    bootout_agent "${FRONTEND_LABEL}" "${FRONTEND_PLIST}"
+    bootstrap_agent "${DAEMON_LABEL}" "${DAEMON_PLIST}"
+    bootstrap_agent "${FRONTEND_LABEL}" "${FRONTEND_PLIST}"
     # kickstart triggers an immediate start without waiting for login.
     launchctl kickstart -k "${GUI_DOMAIN}/${DAEMON_LABEL}"   || true
     launchctl kickstart -k "${GUI_DOMAIN}/${FRONTEND_LABEL}" || true
@@ -157,8 +175,8 @@ cmd_install() {
 }
 
 cmd_uninstall() {
-    launchctl bootout "${GUI_DOMAIN}/${DAEMON_LABEL}"   2>/dev/null || true
-    launchctl bootout "${GUI_DOMAIN}/${FRONTEND_LABEL}" 2>/dev/null || true
+    bootout_agent "${DAEMON_LABEL}" "${DAEMON_PLIST}"
+    bootout_agent "${FRONTEND_LABEL}" "${FRONTEND_PLIST}"
     rm -f "${DAEMON_PLIST}" "${FRONTEND_PLIST}"
     echo "Removed LaunchAgents (plist files and loaded jobs)."
 }

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import logging
 
 import objc
 from AppKit import (
@@ -34,6 +35,8 @@ from AppKit import (
     NSView,
 )
 
+log = logging.getLogger("glucose.frontend.graph")
+
 # --- layout (in points) ---
 # Plot area = view bounds minus padding. Left padding leaves room for a
 # couple of mg/dL labels; bottom padding leaves room for the time axis.
@@ -45,7 +48,8 @@ _PAD_BOTTOM = 16
 _LINE_WIDTH = 1.5
 _DOT_RADIUS = 3.0
 _THRESHOLD_GUIDE_WIDTH = 1.0
-_THRESHOLD_GUIDE_DASH = [2.0, 3.0]
+_THRESHOLD_GUIDE_DOT = 2.0
+_THRESHOLD_GUIDE_GAP = 3.0
 _BAND_ALPHA_BASE = 0.10
 _BAND_ALPHA_ACTIVE = 0.24
 
@@ -92,25 +96,29 @@ class GlucoseGraphView(NSView):
     # --- drawing ---
 
     def drawRect_(self, _dirty):  # noqa: N802 - Obj-C selector
-        bounds = self.bounds()
-        plot = NSMakeRect(
-            _PAD_LEFT,
-            _PAD_BOTTOM,
-            bounds.size.width - _PAD_LEFT - _PAD_RIGHT,
-            bounds.size.height - _PAD_TOP - _PAD_BOTTOM,
-        )
-        if plot.size.width <= 0 or plot.size.height <= 0:
-            return
+        try:
+            bounds = self.bounds()
+            plot = NSMakeRect(
+                _PAD_LEFT,
+                _PAD_BOTTOM,
+                bounds.size.width - _PAD_LEFT - _PAD_RIGHT,
+                bounds.size.height - _PAD_TOP - _PAD_BOTTOM,
+            )
+            if plot.size.width <= 0 or plot.size.height <= 0:
+                return
 
-        self._draw_threshold_bands(plot)
-        self._draw_threshold_guides(plot)
-        self._draw_y_labels(plot)
-        self._draw_x_labels(plot)
-        if not self._points:
-            self._draw_empty(bounds)
-            return
-        self._draw_line(plot)
-        self._draw_latest_dot(plot)
+            self._draw_threshold_bands(plot)
+            self._draw_threshold_guides(plot)
+            self._draw_y_labels(plot)
+            self._draw_x_labels(plot)
+            if not self._points:
+                self._draw_empty(bounds)
+                return
+            self._draw_line(plot)
+            self._draw_latest_dot(plot)
+        except Exception:  # noqa: BLE001
+            # Never let a draw callback crash the whole menubar app.
+            log.exception("Graph drawRect failed")
 
     # --- coordinate mapping ---
 
@@ -179,13 +187,16 @@ class GlucoseGraphView(NSView):
             if not (_Y_MIN <= value <= _Y_MAX):
                 continue
             y = self._y_for(plot, value)
-            path = NSBezierPath.bezierPath()
-            path.setLineWidth_(_THRESHOLD_GUIDE_WIDTH)
-            path.setLineDash_count_phase_(_THRESHOLD_GUIDE_DASH, len(_THRESHOLD_GUIDE_DASH), 0.0)
-            path.moveToPoint_(NSMakePoint(plot.origin.x, y))
-            path.lineToPoint_(NSMakePoint(plot.origin.x + plot.size.width, y))
             color.colorWithAlphaComponent_(0.55).setStroke()
-            path.stroke()
+            x = plot.origin.x
+            x_end = plot.origin.x + plot.size.width
+            while x < x_end:
+                seg = NSBezierPath.bezierPath()
+                seg.setLineWidth_(_THRESHOLD_GUIDE_WIDTH)
+                seg.moveToPoint_(NSMakePoint(x, y))
+                seg.lineToPoint_(NSMakePoint(min(x + _THRESHOLD_GUIDE_DOT, x_end), y))
+                seg.stroke()
+                x += _THRESHOLD_GUIDE_DOT + _THRESHOLD_GUIDE_GAP
 
     def _draw_x_labels(self, plot) -> None:
         attrs = self._small_text_attrs()
