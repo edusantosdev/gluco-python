@@ -73,9 +73,8 @@ _GRAPH_HEIGHT = 110
 # shared cosine curve whenever the reading's trend is directional
 # (rising or falling, slow or fast). Values chosen for a calm, ambient
 # feel:
-#   * ``_PULSE_PERIOD_S`` — 3s is slow enough to be peripheral-vision-
-#     noticeable without being distracting (roughly a breathing rhythm,
-#     ~20 cycles/min).
+#   * ``_PULSE_PERIOD_S`` — 2s keeps it noticeable but still calm
+#     (roughly ~30 cycles/min).
 #   * ``_PULSE_MIN_ALPHA`` — keeps both the value and arrow clearly
 #     legible at the dimmest point. Dropping below ~0.4 starts to read
 #     as "broken"; pulling too close to 1.0 removes the effect.
@@ -87,7 +86,7 @@ _GRAPH_HEIGHT = 110
 # animating a sideways arrow would suggest motion that isn't there.
 # The trailing ``*`` on stale readings never pulses; it's a status flag,
 # not part of the live reading.
-_PULSE_PERIOD_S = 3.0
+_PULSE_PERIOD_S = 2.0
 _PULSE_TICK_S = 0.1
 _PULSE_MIN_ALPHA = 0.45
 _ARROW_PULSE_SYMBOLS = frozenset({"↓", "↘", "↗", "↑"})
