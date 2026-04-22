@@ -44,6 +44,8 @@ _PAD_BOTTOM = 16
 
 _LINE_WIDTH = 1.5
 _DOT_RADIUS = 3.0
+_THRESHOLD_GUIDE_WIDTH = 1.0
+_THRESHOLD_GUIDE_DASH = [2.0, 3.0]
 
 # Y-axis bounds in mg/dL. Pinned (not auto-fit) so the graph reads
 # consistently across glances — the eye learns where "high" is.
@@ -99,6 +101,7 @@ class GlucoseGraphView(NSView):
             return
 
         self._draw_threshold_bands(plot)
+        self._draw_threshold_guides(plot)
         self._draw_y_labels(plot)
         self._draw_x_labels(plot)
         if not self._points:
@@ -158,6 +161,27 @@ class GlucoseGraphView(NSView):
             label.drawAtPoint_(
                 NSMakePoint(plot.origin.x - size.width - 3, y - size.height / 2)
             )
+
+    def _draw_threshold_guides(self, plot) -> None:
+        """Draw dotted guides on the green-zone boundaries (low/high)."""
+        t = self._thresholds
+        if t is None:
+            return
+        guides = (
+            (t.low, NSColor.systemGreenColor()),
+            (t.high, NSColor.systemGreenColor()),
+        )
+        for value, color in guides:
+            if not (_Y_MIN <= value <= _Y_MAX):
+                continue
+            y = self._y_for(plot, value)
+            path = NSBezierPath.bezierPath()
+            path.setLineWidth_(_THRESHOLD_GUIDE_WIDTH)
+            path.setLineDash_count_phase_(_THRESHOLD_GUIDE_DASH, len(_THRESHOLD_GUIDE_DASH), 0.0)
+            path.moveToPoint_(NSMakePoint(plot.origin.x, y))
+            path.lineToPoint_(NSMakePoint(plot.origin.x + plot.size.width, y))
+            color.colorWithAlphaComponent_(0.55).setStroke()
+            path.stroke()
 
     def _draw_x_labels(self, plot) -> None:
         attrs = self._small_text_attrs()
