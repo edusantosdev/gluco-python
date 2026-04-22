@@ -54,7 +54,6 @@ from macos_frontend.api_client import (  # noqa: E402
     DaemonClient,
     DaemonError,
     DaemonUnreachable,
-    GraphPoint,
 )
 from macos_frontend.graph_view import GlucoseGraphView, GraphThresholds  # noqa: E402
 from macos_frontend.notifier import NotificationPolicy, Notifier  # noqa: E402
@@ -507,8 +506,6 @@ class GlucoseApp(rumps.App):
         self._notifier = notifier
 
         self._reading_updated_item = rumps.MenuItem("Connecting…")
-        self._reading_unit_item = rumps.MenuItem("—")
-        self._zone_pct_item = rumps.MenuItem(f"Time in Zones ({_GRAPH_HOURS}h): —")
         self._refresh_item = rumps.MenuItem("Refresh Now", callback=self._on_refresh)
         self._reauth_item = rumps.MenuItem("Force Re-Authenticate", callback=self._on_reauth)
         self._notifs_item = rumps.MenuItem(
@@ -537,8 +534,6 @@ class GlucoseApp(rumps.App):
             self._graph_item,
             None,
             self._reading_updated_item,
-            self._reading_unit_item,
-            self._zone_pct_item,
             None,
             self._refresh_item,
             self._reauth_item,
@@ -602,16 +597,12 @@ class GlucoseApp(rumps.App):
             log.warning("Daemon unreachable: %s", e)
             self._set_title("⚠ Daemon Offline")
             self._reading_updated_item.title = "Background Service Offline"
-            self._reading_unit_item.title = "Start the Daemon"
-            self._zone_pct_item.title = f"Time in Zones ({_GRAPH_HOURS}h): —"
             self._graph_view.setPoints_([])
             return
         except DaemonError as e:
             log.warning("Daemon error: %s", e)
             self._set_title("⚠ Daemon Error")
             self._reading_updated_item.title = "Background Service Error"
-            self._reading_unit_item.title = "Try Force Re-Authenticate"
-            self._zone_pct_item.title = f"Time in Zones ({_GRAPH_HOURS}h): —"
             self._graph_view.setPoints_([])
             return
 
@@ -625,9 +616,8 @@ class GlucoseApp(rumps.App):
             color = _color_for(value_for_color, self.thresholds)
         self._set_title(title, color=color)
 
-        u_line, units_line = _reading_menu_labels(reading)
+        u_line, _units_line = _reading_menu_labels(reading)
         self._reading_updated_item.title = u_line
-        self._reading_unit_item.title = units_line
 
         if self._notifier is not None:
             self._notifier.handle(
@@ -650,12 +640,10 @@ class GlucoseApp(rumps.App):
         except (DaemonUnreachable, DaemonError) as e:
             log.debug("Graph fetch failed: %s", e)
             self._graph_view.setPoints_([])
-            self._zone_pct_item.title = f"Time in Zones ({_GRAPH_HOURS}h): —"
             return
         self._graph_view.setPoints_(
             [(p.timestamp.timestamp(), p.value_mg_dl) for p in points]
         )
-        self._zone_pct_item.title = self._zone_percentages_line(points)
 
     def _graph_thresholds(self) -> GraphThresholds:
         return GraphThresholds(
@@ -663,41 +651,6 @@ class GlucoseApp(rumps.App):
             high=self.thresholds.high,
             very_high=self.thresholds.very_high,
         )
-
-    def _zone_percentages_line(self, points: list[GraphPoint]) -> str:
-        """Return one-line time-in-zone summary for the current graph window."""
-        prefix = f"Time in Zones ({_GRAPH_HOURS}h): "
-        if len(points) < 2:
-            return prefix + "—"
-        points = sorted(points, key=lambda p: p.timestamp)
-        seconds_by_zone = {"L": 0.0, "G": 0.0, "Y": 0.0, "O": 0.0}
-        for a, b in zip(points, points[1:]):
-            dt = (b.timestamp - a.timestamp).total_seconds()
-            if dt <= 0:
-                continue
-            zone = self._zone_key(a.value_mg_dl)
-            seconds_by_zone[zone] += dt
-        total = sum(seconds_by_zone.values())
-        if total <= 0:
-            return prefix + "—"
-        low_pct = int(round((seconds_by_zone["L"] / total) * 100))
-        green_pct = int(round((seconds_by_zone["G"] / total) * 100))
-        yellow_pct = int(round((seconds_by_zone["Y"] / total) * 100))
-        orange_pct = int(round((seconds_by_zone["O"] / total) * 100))
-        return (
-            prefix
-            + f"L {low_pct}% | G {green_pct}% | "
-            + f"Y {yellow_pct}% | O {orange_pct}%"
-        )
-
-    def _zone_key(self, value_mg_dl: float) -> str:
-        if value_mg_dl < self.thresholds.low:
-            return "L"
-        if value_mg_dl > self.thresholds.very_high:
-            return "O"
-        if value_mg_dl > self.thresholds.high:
-            return "Y"
-        return "G"
 
     def _on_refresh(self, _sender) -> None:
         log.info("Manual refresh")
