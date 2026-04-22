@@ -9,21 +9,36 @@ for design details.
 ## Quick start
 
 ```bash
-# 1. Virtualenv + deps (Python 3.11+)
+# 1. Virtualenv + deps (Python 3.11+; macOS only — frontend uses AppKit)
 python3 -m venv .venv
-.venv/bin/pip install pylibrelinkup rumps python-dotenv keyring \
-                     fastapi uvicorn pydantic-settings httpx
+.venv/bin/python -m pip install -e .
 
-# 2. Credentials — pick one
-.venv/bin/python scripts/set_credentials.py     # macOS Keychain (recommended)
-cp .env.example .env && $EDITOR .env            # or .env file
+# 2. Sanity-check the LibreLinkUp account before going further
+cp .env.example .env && $EDITOR .env          # fill in email/password/region
+.venv/bin/python scripts/phase0_probe.py      # prints a JSON reading on success
 
-# 3. Run daemon + menubar in one terminal (Ctrl+C stops both)
-(.venv/bin/python -m daemon &) ; DAEMON_PID=$! ; .venv/bin/python -m macos_frontend ; kill $DAEMON_PID 2>/dev/null
+# 3. Move credentials into the macOS Keychain (recommended; you can also
+#    leave them in .env, or set them later from the menubar)
+.venv/bin/python scripts/set_credentials.py
+
+# 4a. Recommended: install both LaunchAgents. This builds the
+#     build/Glucose Menubar.app wrapper, renders the plists, and starts
+#     the daemon + menubar so they auto-start on every login.
+scripts/install_launchagent.sh install
+
+# 4b. Or run daemon + menubar by hand (Ctrl+C in the second terminal stops
+#     the menubar; the trap kills the daemon when that shell exits):
+.venv/bin/python -m daemon & DAEMON_PID=$!
+trap 'kill $DAEMON_PID 2>/dev/null' EXIT
+.venv/bin/python -m macos_frontend
 ```
 
 Keychain wins over `.env`. `scripts/set_credentials.py --show` reports
-the active source; `--clear` removes the Keychain entries.
+the active source; `--clear` removes the Keychain entries. You can
+also set / change credentials from the menubar at any time via
+**Update Credentials…** — when launched via the LaunchAgent, that
+opens a single native window with email + password fields; in plain
+terminal mode it falls back to two AppleScript prompts.
 
 `LIBRELINKUP_REGION` accepts cluster names (`US`, `EU`, `EU2`, `DE`,
 `FR`, `JP`, `AU`, `CA`, `AE`, `AP`, `LA`, `RU`) or country codes that
@@ -32,15 +47,26 @@ map to one (e.g. `PT`, `ES`, `GB` → `EU`).
 ## Running
 
 The daemon owns all LibreLinkUp interaction and serves
-`http://127.0.0.1:8765`. The menubar app is a thin HTTP client.
+`http://127.0.0.1:8765`. The menubar app is a thin HTTP client. Pick
+whichever combination matches what you need:
 
-**Both, one terminal (Ctrl+C stops both):**
+**Background (recommended).** LaunchAgents start both on login and
+auto-restart on crash:
 
 ```bash
-(.venv/bin/python -m daemon &) ; DAEMON_PID=$! ; .venv/bin/python -m macos_frontend ; kill $DAEMON_PID 2>/dev/null
+scripts/install_launchagent.sh install
 ```
 
-**Menubar only** (daemon already running from LaunchAgent / another terminal):
+**Both, one terminal (Ctrl+C stops the menubar; trap kills the daemon):**
+
+```bash
+.venv/bin/python -m daemon & DAEMON_PID=$!
+trap 'kill $DAEMON_PID 2>/dev/null' EXIT
+.venv/bin/python -m macos_frontend
+```
+
+**Menubar only** (daemon already running from LaunchAgent or another
+terminal — note: dialogs degrade to AppleScript prompts in this mode):
 
 ```bash
 .venv/bin/python -m macos_frontend
@@ -73,14 +99,15 @@ curl -s -X POST http://127.0.0.1:8765/auth/refresh | jq
 | `stale`        | `124 →*`           |
 | `starting`     | `···`              |
 | `warming_up`   | `◴`                |
+| `sensor_ended` | `⚠ sensor`         |
 | `no_network`   | `⚠ net`            |
 | `auth_failed`  | `⚠ auth`           |
 | `tos_required` | `⚠ ToS`            |
 | `rate_limited` | `⚠ rate`           |
 | daemon down    | `⚠ daemon`         |
 
-Click the icon for status details, **Refresh now**, **Force
-re-authenticate**, **Update credentials…**, **Set thresholds…**,
+Click the icon for status details, **Refresh Now**, **Force
+Re-Authenticate**, **Update Credentials…**, **Set Thresholds…**,
 **Notifications** toggle, and **Quit**.
 
 ### Colour scheme
@@ -154,7 +181,7 @@ The installer builds a thin `build/Glucose Menubar.app` wrapper bundle
 and points the frontend LaunchAgent at its `Contents/MacOS/Glucose Menubar`
 executable. The bundle gives AppKit a real `CFBundleIdentifier` and
 `LSUIElement`, which is what lets us show native dialogs (e.g. the
-single-window **Update credentials…** form) and notifications. When
+single-window **Update Credentials…** form) and notifications. When
 running directly via `python -m macos_frontend` from a terminal, the
 app detects the missing bundle and falls back to AppleScript dialogs.
 
@@ -192,14 +219,26 @@ processes; killing port 8765 only stops the daemon. Quit via the menu,
 or:
 
 ```bash
-pkill -f "python.*-m macos_frontend"
+pkill -f "Glucose Menubar"            # bundled launch (default)
+pkill -f "python.*-m macos_frontend"  # plain terminal launch
 # if LaunchAgent keeps restarting it:
 launchctl bootout "gui/$(id -u)/com.glucose-display.frontend"
 ```
 
-**Menu greys out after clicking Update credentials / Set thresholds.**
-Dialogs are deferred a beat so the menu can finish tearing down;
-if it still hangs, file an issue with your macOS version.
+**Update Credentials… / Set Thresholds… do nothing.** You're probably
+running the frontend from a plain terminal (`python -m macos_frontend`)
+without the `.app` bundle. AppKit won't open modal dialogs from an
+unbundled process; the app falls back to AppleScript dialogs in that
+mode. Either accept the AppleScript prompts (look for them on top of
+your other windows — `⌘⇥` to **osascript**), or install via
+`scripts/install_launchagent.sh install` to get the native single-window
+flow.
+
+**Stale `build/Glucose Menubar.app`.** The bundle just wraps the venv
+with symlinks — re-run `scripts/install_launchagent.sh install` after
+recreating the venv (the symlink targets change) or after upgrading
+Python's minor version (the `Contents/lib/pythonX.Y/site-packages`
+symlink is version-specific).
 
 ## Operational notes
 
@@ -213,13 +252,14 @@ if it still hangs, file an issue with your macOS version.
   `warming_up`, not a network error.
 - **Logs:** `~/.glucose-display/daemon.log` (1 MB × 3 backups).
   `SIGTERM`/`SIGINT` exit cleanly (`Poller stopped` line in the log).
-- **Packaging:** `scripts/install_launchagent.sh install` builds a
-  `build/Glucose Menubar.app` wrapper bundle that symlinks the real
-  venv — no py2app, no rebundle-on-every-edit loop. The bundle gives
-  AppKit a real `CFBundleIdentifier` + `LSUIElement`, which is what
-  lets us show native modal dialogs and notifications. Running
-  `python -m macos_frontend` directly skips the bundle and falls back
-  to AppleScript dialogs.
+- **Packaging:** the `build/Glucose Menubar.app` wrapper produced by
+  the installer is a thin symlink shell around the real venv (no
+  py2app, no rebundle-on-every-edit). It's small enough to inspect by
+  hand: an `Info.plist` for the bundle identity, a `pyvenv.cfg` that
+  redirects the bundled Python symlink back to the project's
+  `site-packages`, and `Contents/MacOS/Glucose Menubar` symlinking to
+  `.venv/bin/python`. See [`scripts/app_bundle/`](./scripts/app_bundle/)
+  for the templates.
 
 Run the test suite:
 

@@ -10,12 +10,14 @@
   LimitLoadToSessionType=Aqua makes launchd load this only in a real
   login session, not in loginwindow or an SSH session.
 
-  We launch the ``.app`` bundle's ``Contents/MacOS/launcher`` rather
-  than invoking ``python -m macos_frontend`` directly, so AppKit
-  resolves ``NSBundle.mainBundle`` to our bundle and sees its
-  ``CFBundleIdentifier`` / ``LSUIElement``. Without that, modal
-  dialogs and NSUserNotification delivery silently fail and launchd
-  ends up in a crash/relaunch loop.
+  ``ProgramArguments[0]`` (substituted at install time as
+  ``__APP_EXECUTABLE__``) points at the symlinked Python *inside* the
+  ``Glucose Menubar.app`` bundle (``Contents/MacOS/Glucose Menubar``),
+  not at ``.venv/bin/python`` directly. Routing through the bundled
+  symlink is what makes AppKit resolve ``NSBundle.mainBundle`` to our
+  bundle and pick up its ``CFBundleIdentifier`` / ``LSUIElement``.
+  Without that, modal dialogs and NSUserNotification delivery silently
+  fail and launchd ends up in a crash/relaunch loop.
 -->
 <plist version="1.0">
 <dict>

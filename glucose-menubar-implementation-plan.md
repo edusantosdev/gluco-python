@@ -70,7 +70,7 @@ The daemon runs on `localhost` only, no authentication, no TLS. It is a personal
 
 **Layer 3 — Eventual Swift rewrite (optional):** SwiftUI with `MenuBarExtra`. Rationale: native macOS integration, single `.app` bundle with no Python runtime dependency, access to future Apple-only features like Live Activities or Watch complications. Not needed for MVP.
 
-**Packaging (later):** `py2app` for macOS `.app` bundles, `briefcase` as an alternative if py2app proves painful. For the Linux frontend, a `systemd --user` service for the daemon plus a regular binary for the UI.
+**Packaging:** for macOS, a thin "wrapper" `.app` bundle rather than a full py2app/briefcase freeze. The bundle under `build/Glucose Menubar.app/` is just an `Info.plist` + a `Contents/MacOS/Glucose Menubar` symlink to the real venv's `python` + a copy of `pyvenv.cfg` and a `site-packages` symlink inside `Contents/`. No interpreter freeze, no re-bundle-on-every-edit loop. This is enough to give AppKit a valid `CFBundleIdentifier` and `LSUIElement=true`, which is the only reason most people reach for py2app in the first place (see section 10 for why those keys matter). For the Linux frontend, a `systemd --user` service for the daemon plus a regular binary for the UI.
 
 **Development tooling:** `uv` for environment management (faster than pip/poetry, handles Python versions), `ruff` for linting and formatting, `pytest` for tests. Standard modern Python stack.
 
@@ -98,7 +98,7 @@ Handle the failure modes that only reveal themselves over days of real use: sens
 
 ### Phase 4 — macOS polish (optional, a weekend)
 
-Launch-at-login via LaunchAgent plist. Preferences window for credentials. Notifications for hypo/hyper thresholds. Icon variations for low/in-range/high states. This is where the app graduates from "works for me" to "I actually rely on it."
+Launch-at-login via LaunchAgent plist. Credentials / thresholds editable from the menubar instead of only via `.env`. Notifications for hypo/hyper thresholds. Colour-coded menubar text for low/in-range/high states. A thin `.app` wrapper bundle to give AppKit a real `CFBundleIdentifier` + `LSUIElement` — without it, `NSAlert.runModal()` and `NSUserNotification` silently tear the launchd-spawned Python process down, so the menu Edit Credentials / Set Thresholds items look like they do nothing. The bundle lives at `build/Glucose Menubar.app/` and is rebuilt by `scripts/install_launchagent.sh install`. This is where the app graduates from "works for me" to "I actually rely on it."
 
 ### Phase 5 — Linux port (a few evenings)
 
@@ -740,9 +740,25 @@ If you end up patching `pylibrelinkup` locally, keep the patches in a separate f
 
 A LaunchAgent plist at `~/Library/LaunchAgents/com.glucose-display.daemon.plist` starts the daemon on login with `KeepAlive` set to true. The frontend is a separate LaunchAgent that runs the rumps app. Keeping them as separate agents means a frontend crash doesn't kill the daemon, and launchd's `ThrottleInterval` (default 10s) prevents a crash-loop from burning CPU.
 
-Credentials live in macOS Keychain, not `.env`, once the app is packaged. The `keyring` Python library handles this cross-platform. `scripts/set_credentials.py` is a one-shot helper that prompts for email/password and writes them to Keychain; the daemon's `config.py` reads Keychain first and falls back to `.env` only if the Keychain entry is absent, so development and production use the same code path.
+Credentials live in macOS Keychain, not `.env`, once the app is packaged. The `keyring` Python library handles this cross-platform. `scripts/set_credentials.py` is a one-shot helper that prompts for email/password and writes them to Keychain; the daemon's `config.py` reads Keychain first and falls back to `.env` only if the Keychain entry is absent, so development and production use the same code path. The frontend also exposes an **Update Credentials…** menu item that writes to the same Keychain service; when the frontend is launched via the LaunchAgent (i.e. inside the bundle) that item opens a single native `NSAlert` with email + password fields, and when launched from a terminal it falls back to two sequential AppleScript dialogs.
 
-When the frontend is eventually bundled as a `.app` (py2app/briefcase), its `Info.plist` needs `LSUIElement=1` so it shows only a menubar item and no dock icon. Not relevant when running `python macos_frontend/app.py` from the terminal during development, but a silent gotcha at packaging time.
+**Why the frontend launches out of a `.app` wrapper bundle.** AppKit bakes a handful of features against the containing bundle's `Info.plist`: `NSUserNotification` delivery checks `CFBundleIdentifier`, `NSAlert.runModal()` from a menu callback needs a registered bundle to not get killed by launchd when it tries to present a modal, and `LSUIElement=true` is what makes the process menubar-only (no Dock icon). Running `python -m macos_frontend` straight out of the venv gives you none of those. The fix is a thin wrapper bundle at `build/Glucose Menubar.app/`, rendered by `scripts/install_launchagent.sh install`, structured as:
+
+```
+Glucose Menubar.app/
+  Contents/
+    Info.plist                           # CFBundleIdentifier, LSUIElement=true
+    pyvenv.cfg                           # copy of .venv/pyvenv.cfg so the bundled
+                                         # python still activates the real venv
+    lib/python3.12/site-packages/        # symlink → .venv/lib/python3.12/site-packages
+    MacOS/
+      Glucose Menubar                    # symlink → .venv/bin/python (CFBundleExecutable)
+      launcher                           # optional shell stub for dev
+```
+
+The frontend LaunchAgent's `ProgramArguments` is `["…/MacOS/Glucose Menubar", "-m", "macos_frontend"]`. When Python starts from inside the bundle, `_NSGetExecutablePath()` sees a path under `Contents/MacOS/`, `NSBundle.mainBundle()` walks up to `Contents/Info.plist`, and AppKit picks up our bundle identity. At the same time Python's venv discovery finds `Contents/pyvenv.cfg` one directory above `MacOS/` and resolves `site-packages` via the symlink, so all installed deps (`rumps`, `pyobjc`, `httpx`, etc.) are still importable. No py2app freeze, no rebundle-on-every-edit; `git pull` and the bundle keeps working. The bundle's runtime check (`macos_frontend.app._is_bundled()`) simply compares `NSBundle.mainBundle().bundleIdentifier()` against the expected value and toggles between native-AppKit dialogs and the AppleScript fallback.
+
+For a fully self-contained redistributable (signed, notarised, runs on a Mac without the repo) you'd still need py2app or briefcase. That's out of scope — the app is meant to run from the user's own clone of the repo.
 
 **macOS distribution (Phase 6, only if sharing with others):**
 

@@ -8,9 +8,9 @@
 #   scripts/install_launchagent.sh logs        # tail launchd stdout/stderr
 #
 # The templates under scripts/launchagents/ use __VENV_PYTHON__,
-# __REPO_ROOT__, and __STATE_DIR__ placeholders so the installed plists
-# are fully qualified paths — launchd runs without a useful $PATH, and
-# plists with bare commands just silently fail.
+# __REPO_ROOT__, __STATE_DIR__, and __APP_EXECUTABLE__ placeholders so
+# the installed plists are fully qualified paths — launchd runs without
+# a useful $PATH, and plists with bare commands just silently fail.
 
 set -euo pipefail
 
@@ -33,11 +33,11 @@ FRONTEND_TMPL="${REPO_ROOT}/scripts/launchagents/${FRONTEND_LABEL}.plist.tmpl"
 # for the full explanation.
 APP_BUNDLE_SRC="${REPO_ROOT}/scripts/app_bundle"
 APP_BUNDLE_DST="${REPO_ROOT}/build/Glucose Menubar.app"
-# ``APP_EXECUTABLE`` is the symlinked Python inside the bundle; launchd
-# runs it with ``-m macos_frontend``. ``APP_LAUNCHER`` is the shell-script
-# alternative kept for dev / debugging.
+# ``APP_EXECUTABLE`` is the symlinked venv Python inside the bundle.
+# launchd execs it with ``-m macos_frontend``; Launch Services keys the
+# bundle to that executable path, which is what gives AppKit our
+# ``CFBundleIdentifier``.
 APP_EXECUTABLE="${APP_BUNDLE_DST}/Contents/MacOS/Glucose Menubar"
-APP_LAUNCHER="${APP_BUNDLE_DST}/Contents/MacOS/launcher"
 
 GUI_DOMAIN="gui/$(id -u)"
 
@@ -80,7 +80,6 @@ build_app_bundle() {
     #       lib/python3.x/site-packages/     (symlink → .venv/...)
     #       MacOS/
     #         Glucose Menubar                (symlink → .venv/bin/python)
-    #         launcher                       (kept for dev convenience)
     local contents="${APP_BUNDLE_DST}/Contents"
     local macos="${contents}/MacOS"
     mkdir -p "${macos}" "${contents}/Resources"
@@ -90,15 +89,6 @@ build_app_bundle() {
         -e "s|__REPO_ROOT__|${REPO_ROOT}|g" \
         "${APP_BUNDLE_SRC}/Info.plist.tmpl" > "${contents}/Info.plist"
     plutil -lint "${contents}/Info.plist" >/dev/null
-
-    # launcher.sh is kept around so you can invoke the frontend by
-    # running the shell script directly during development. launchd
-    # uses the symlinked Python executable instead (see below).
-    sed \
-        -e "s|__VENV_PYTHON__|${VENV_PYTHON}|g" \
-        -e "s|__REPO_ROOT__|${REPO_ROOT}|g" \
-        "${APP_BUNDLE_SRC}/launcher.tmpl" > "${APP_LAUNCHER}"
-    chmod +x "${APP_LAUNCHER}"
 
     # ``CFBundleExecutable`` in Info.plist is ``Glucose Menubar``; this
     # symlink is what launchd actually execs, and what Python sees as
@@ -137,8 +127,9 @@ cmd_install() {
     echo >&2 "this LaunchAgent will fail with 'Another glucose daemon is already running'."
     mkdir -p "${LA_DIR}" "${STATE_DIR}"
 
-    # The frontend plist points at the launcher *inside* the bundle,
-    # so the bundle has to exist before we bootstrap.
+    # The frontend plist's ProgramArguments[0] points at the symlinked
+    # Python *inside* the bundle, so the bundle has to exist before we
+    # bootstrap.
     build_app_bundle
 
     render_plist "${DAEMON_TMPL}" "${DAEMON_PLIST}"

@@ -19,9 +19,11 @@
   icon, no app switcher entry, exactly what we want.
 
   The Python interpreter inherits this bundle identity because
-  launchd spawns it via ``Contents/MacOS/launcher`` inside the
-  bundle, and Launch Services infers the bundle from the executable
-  path. ``exec`` from the shell stub preserves that.
+  launchd execs the symlink at ``Contents/MacOS/Glucose Menubar``
+  (which points at the venv's Python) — Launch Services infers the
+  containing ``.app`` from that executable path, and Python finds
+  ``pyvenv.cfg`` one directory up under ``Contents/`` so the venv's
+  ``site-packages`` is still on ``sys.path``.
 -->
 <plist version="1.0">
 <dict>

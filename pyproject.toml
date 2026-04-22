@@ -1,23 +1,41 @@
 [project]
 name = "glucose-display"
-version = "0.1.0"
-description = "Personal glucose menubar app for macOS (Phase 1 MVP)"
+version = "0.2.0"
+description = "Personal LibreLinkUp glucose menubar app for macOS (daemon + frontend)."
 requires-python = ">=3.11"
+# All four runtime components — daemon HTTP server, polling client,
+# menubar frontend, and credentials helper — are needed for daily use,
+# so they all live under the default install set. ``pip install -e .``
+# alone is enough to run the app; no extras dance.
 dependencies = [
+    # LibreLinkUp client used by the daemon and the phase-0 probe.
     "pylibrelinkup>=0.10.0,<0.12",
+    # Menubar UI; pulls in pyobjc-framework-Cocoa, which gives us
+    # ``AppKit`` and ``Foundation`` for the native dialogs in the frontend.
     "rumps>=0.4.0",
+    # ``.env`` loader used by the daemon, the frontend, and the probe.
     "python-dotenv>=1.0.0",
+    # Keychain bridge for credentials.
     "keyring>=24.0",
+    # Daemon HTTP API.
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    # Typed settings for the daemon.
+    "pydantic-settings>=2.0",
+    # Synchronous HTTP client used by the frontend to talk to the daemon.
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.4"]
-daemon = [
-    "fastapi>=0.110",
-    "uvicorn>=0.29",
-    "pydantic-settings>=2.0",
-    "httpx>=0.27",
-]
+
+# Flat layout with three sibling top-level packages — setuptools' default
+# auto-discovery refuses to build that without an explicit list, so we
+# enumerate them here. ``mvp.py`` and ``scripts/`` stay outside the
+# package set on purpose: the MVP is a single-file script, and scripts
+# are run directly from the repo, not installed.
+[tool.setuptools]
+packages = ["daemon", "glucose_common", "macos_frontend"]
 
 [tool.ruff]
 line-length = 100
