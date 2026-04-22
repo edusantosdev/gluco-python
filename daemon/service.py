@@ -375,12 +375,27 @@ class GlucoseService:
             return
 
         new_status = self._classify(reading, now)
+        points = self._normalize_history(history, now=now)
+        # LibreView's ``graph_data`` samples at a coarse interval (~15 min)
+        # while ``glucose_measurement`` updates every minute. Without this
+        # append, the rightmost dot on the menubar graph visibly lags the
+        # headline number — e.g. menubar says 179 while the graph's last
+        # point is still the 190 from 12 min ago. Treat the current
+        # measurement as the newest sample so the line always terminates
+        # where the big number says it should. We only append when strictly
+        # newer than the last historical point so a graph_data sample
+        # reporting the same timestamp doesn't get duplicated.
+        current_point = self._point_from_reading(reading)
+        if current_point is not None and (
+            not points or current_point[0] > points[-1][0]
+        ):
+            points.append(current_point)
         self._set_state(
             status=new_status,
             reading=reading,
             fetched_at=now,
             last_error=None,
-            history=self._normalize_history(history, now=now),
+            history=points,
             reset_failures=True,
         )
 
@@ -414,6 +429,30 @@ class GlucoseService:
             points.append((ts, float(value)))
         points.sort(key=lambda p: p[0])
         return points
+
+    @staticmethod
+    def _point_from_reading(reading: object) -> tuple[datetime, float] | None:
+        """Extract a ``(utc_ts, mg_dl)`` tuple from a ``glucose_measurement``.
+
+        Mirrors the extraction rules in :meth:`_normalize_history` so the
+        current measurement lines up with historical points on the same
+        axis. Returns ``None`` when either timestamp or value is missing.
+        """
+        if reading is None:
+            return None
+        ts = getattr(reading, "factory_timestamp", None) or getattr(
+            reading, "timestamp", None
+        )
+        if ts is None:
+            return None
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
+        value = getattr(reading, "value_in_mg_per_dl", None)
+        if value is None:
+            value = getattr(reading, "value", None)
+        if value is None:
+            return None
+        return (ts, float(value))
 
     # --- internals: classification ---
 

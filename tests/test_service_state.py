@@ -203,8 +203,56 @@ def test_tick_drops_history_older_than_retention(service: GlucoseService) -> Non
     )
     service._tick()
     cached = service.snapshot().history
-    assert len(cached) == 1
-    assert round(cached[0][1]) == 110
+    # Old point dropped; the other fresh point stays. The current measurement
+    # is also appended (newer than the retained sample), so we expect two.
+    assert 200 not in {round(v) for _, v in cached}
+    assert any(round(v) == 110 for _, v in cached)
+
+
+def test_tick_appends_current_reading_when_newer_than_history(
+    service: GlucoseService,
+) -> None:
+    """The rightmost graph point must equal the current ``glucose_measurement``.
+
+    LibreView's ``graph_data`` only refreshes every ~15 min while the
+    headline reading updates every minute, so the daemon must append the
+    current measurement when it's newer to keep the menubar number and
+    the graph's last dot in sync.
+    """
+    assert service._authenticate_once()
+    # History samples 5, 10, 15 min old — none match the current reading.
+    history = [
+        _fake_reading(age_seconds=15 * 60, value=150.0),
+        _fake_reading(age_seconds=10 * 60, value=160.0),
+        _fake_reading(age_seconds=5 * 60, value=170.0),
+    ]
+    service.client.read_queue.append(
+        _fake_graph_response(reading_age_seconds=30, history=history)
+    )
+    service._tick()
+    cached = service.snapshot().history
+    # Sorted oldest-first, so the newest value should be the current reading's.
+    assert cached[-1][1] == 120.0  # _fake_reading default value
+    assert len(cached) == len(history) + 1
+
+
+def test_tick_does_not_duplicate_when_current_matches_latest_history(
+    service: GlucoseService,
+) -> None:
+    """If graph_data's newest sample is the current reading, don't duplicate it."""
+    assert service._authenticate_once()
+    shared = _fake_reading(age_seconds=0, value=123.0)
+    history = [
+        _fake_reading(age_seconds=5 * 60, value=150.0),
+        shared,
+    ]
+    resp = _fake_graph_response(history=history)
+    resp.data.connection.glucose_measurement = shared  # same object ⇒ same ts
+    service.client.read_queue.append(resp)
+    service._tick()
+    cached = service.snapshot().history
+    assert len(cached) == 2
+    assert cached[-1][1] == 123.0
 
 
 def test_tick_marks_stale_when_reading_too_old(service: GlucoseService) -> None:
