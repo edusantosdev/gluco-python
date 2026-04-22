@@ -23,6 +23,7 @@ In scope:
 - Tray icon title updates, menu actions, notifications, credential updates, and threshold editing.
 - Graph preview in the tray menu (equivalent to current macOS "glance graph").
 - Autostart/service management suitable for Linux desktop usage.
+- RPM packaging + repository publishing so install is a simple `dnf install`.
 
 Out of scope (initially):
 
@@ -90,6 +91,23 @@ Plasma-latest guardrails:
 
 - Add `X-KDE-autostart-after=panel` in the autostart template to reduce race conditions where the tray host is not ready yet.
 - Ensure tray availability check at startup (`QSystemTrayIcon.isSystemTrayAvailable()`), with retry/backoff before showing hard failure.
+
+### 3.4 Distribution model (simple dnf install)
+
+Goal UX:
+
+- User runs `sudo dnf install glucose-display` after enabling one package source.
+
+Recommended publishing path:
+
+- Build a Fedora RPM (`noarch` expected if pure Python).
+- Publish via COPR first (fast iteration), optionally upstream to Fedora package collection later.
+- Keep dependencies resolvable by DNF (`python3dist(...)` Requires in spec).
+
+Install command shape (target experience):
+
+- One-time repo enable: `sudo dnf copr enable <owner>/<project>`
+- App install: `sudo dnf install glucose-display`
 
 ## 4) Phased Implementation
 
@@ -257,6 +275,37 @@ Acceptance:
 - New Linux instructions can be followed cleanly on fresh Fedora KDE setup.
 - CI (if configured) runs daemon + shared module tests without Linux GUI dependencies.
 
+## Phase 6 - RPM packaging for `dnf install`
+
+Deliverables:
+
+- `packaging/fedora/glucose-display.spec`
+- `packaging/fedora/README.md` with build/publish notes
+- Optional automation for source tarball + COPR submission
+
+Package content target:
+
+- Python modules (`daemon`, `glucose_common`, `linux_frontend`, shared frontend modules)
+- Desktop autostart entry template or installed desktop file
+- User service unit/template and helper command docs
+- License + README docs in package
+
+Spec design notes:
+
+- Use `%pyproject_*` macros where possible for modern Fedora Python packaging.
+- Split optional subpackages if needed:
+  - `glucose-display` (daemon + shared core)
+  - `glucose-display-kde` (Linux Plasma frontend/autostart assets), if dependency surface needs separation.
+- Ensure scriptlets do **not** force-start user services during RPM transaction; provide post-install guidance instead.
+
+Acceptance:
+
+- Fresh Fedora KDE host can install with:
+  - `sudo dnf copr enable <owner>/<project>`
+  - `sudo dnf install glucose-display`
+- `dnf upgrade` updates to newer app versions cleanly.
+- Uninstall removes package-owned files without leaving broken user-level config.
+
 ## 5) Proposed File-Level Worklist
 
 ## New files
@@ -273,6 +322,8 @@ Acceptance:
 - `linux_frontend/graph_widget.py`
 - `scripts/install_systemd.sh`
 - `scripts/autostart/glucose-display-frontend.desktop.tmpl`
+- `packaging/fedora/glucose-display.spec`
+- `packaging/fedora/README.md`
 
 ## Modified files
 
@@ -326,6 +377,7 @@ Minimum manual validation:
 4. Add graph widget.
 5. Add install scripts/autostart.
 6. Docs and QA pass.
+7. Add RPM packaging + COPR publishing flow.
 
 This order reduces risk: get a functioning KDE tray quickly, then layer parity features.
 
@@ -337,8 +389,9 @@ Assuming familiarity with Qt/PySide and no major environment surprises:
 - Phase 2 (tray + actions): 1-2 days
 - Graph + notifications + credential UX: 1-2 days
 - Install/docs/QA: 0.5-1 day
+- RPM/COPR packaging and validation: 0.5-1.5 days
 
-Total: roughly **3-6 focused days** for a polished Fedora KDE-first implementation.
+Total: roughly **4-7 focused days** for a polished Fedora KDE-first implementation with `dnf` installability.
 
 ## 10) Definition of Done for Plasma Latest
 
@@ -349,4 +402,5 @@ The Linux port is considered complete for KDE support only when all are true:
 - No Qt5-only dependencies in Linux path.
 - Tray icon, notifications, credentials dialog, thresholds dialog, and graph are all functional after login autostart.
 - README documents the supported Plasma/Fedora window and known limitations.
+- Documented and working `dnf` install path (`copr enable` + `dnf install`) for latest Fedora KDE releases.
 
