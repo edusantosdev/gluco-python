@@ -240,7 +240,7 @@ class GlucoseGraphView(NSView):
 
     def _draw_latest_dot(self, plot) -> None:
         now_s = datetime.now(UTC).timestamp()
-        ts_s, _value = self._points[-1]
+        ts_s, value = self._points[-1]
         x = self._x_for(plot, ts_s, now_s)
         y = self._y_for(plot, value)
         rect = NSMakeRect(

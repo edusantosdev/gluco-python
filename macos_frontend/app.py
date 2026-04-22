@@ -56,6 +56,7 @@ from macos_frontend.api_client import (  # noqa: E402
     DaemonUnreachable,
     GraphPoint,
 )
+from macos_frontend.graph_view import GlucoseGraphView, GraphThresholds  # noqa: E402
 from macos_frontend.notifier import NotificationPolicy, Notifier  # noqa: E402
 
 # Graph appears at the top of the dropdown above the freshness/units rows.
@@ -63,7 +64,8 @@ from macos_frontend.notifier import NotificationPolicy, Notifier  # noqa: E402
 # menu item without dominating the screen". Width is wide enough to make
 # minute-resolution shape visible but not so wide that the menu overflows.
 _GRAPH_HOURS = 8
-_SPARK_CHARS = "▁▂▃▄▅▆▇█"
+_GRAPH_WIDTH = 320
+_GRAPH_HEIGHT = 110
 
 logging.basicConfig(
     level=logging.INFO,
@@ -520,11 +522,16 @@ class GlucoseApp(rumps.App):
             "Set Thresholds…", callback=self._on_edit_thresholds
         )
 
-        # Stability-first graph row: text sparkline instead of a custom NSView.
-        # Custom AppKit drawing inside NSMenuItem views can trigger hard crashes
-        # under launchd in some environments; this path keeps the feature while
-        # avoiding drawRect callbacks entirely.
-        self._graph_item = rumps.MenuItem("Graph: Loading…")
+        # Graph item at the top of the dropdown. ``rumps.MenuItem`` wraps an
+        # ``NSMenuItem`` (exposed as ``._menuitem``); attaching a custom NSView
+        # via ``setView_`` is the supported way to embed non-text content in
+        # an AppKit menu. The empty title is ignored once a view is present.
+        self._graph_view = GlucoseGraphView.alloc().initWithFrame_hours_(
+            NSMakeRect(0, 0, _GRAPH_WIDTH, _GRAPH_HEIGHT), _GRAPH_HOURS
+        )
+        self._graph_view.setThresholds_(self._graph_thresholds())
+        self._graph_item = rumps.MenuItem("")
+        self._graph_item._menuitem.setView_(self._graph_view)
 
         self.menu = [
             self._graph_item,
@@ -594,18 +601,18 @@ class GlucoseApp(rumps.App):
         except DaemonUnreachable as e:
             log.warning("Daemon unreachable: %s", e)
             self._set_title("⚠ Daemon Offline")
-            self._graph_item.title = "Graph: Daemon Offline"
             self._reading_updated_item.title = "Background Service Offline"
             self._reading_unit_item.title = "Start the Daemon"
             self._zone_pct_item.title = f"Time in Zones ({_GRAPH_HOURS}h): —"
+            self._graph_view.setPoints_([])
             return
         except DaemonError as e:
             log.warning("Daemon error: %s", e)
             self._set_title("⚠ Daemon Error")
-            self._graph_item.title = "Graph: Daemon Error"
             self._reading_updated_item.title = "Background Service Error"
             self._reading_unit_item.title = "Try Force Re-Authenticate"
             self._zone_pct_item.title = f"Time in Zones ({_GRAPH_HOURS}h): —"
+            self._graph_view.setPoints_([])
             return
 
         title = _format_title(reading)
@@ -642,29 +649,20 @@ class GlucoseApp(rumps.App):
             points = self._client.graph(hours=_GRAPH_HOURS)
         except (DaemonUnreachable, DaemonError) as e:
             log.debug("Graph fetch failed: %s", e)
-            self._graph_item.title = "Graph: Unavailable"
+            self._graph_view.setPoints_([])
             self._zone_pct_item.title = f"Time in Zones ({_GRAPH_HOURS}h): —"
             return
-        self._graph_item.title = self._sparkline_line(points)
+        self._graph_view.setPoints_(
+            [(p.timestamp.timestamp(), p.value_mg_dl) for p in points]
+        )
         self._zone_pct_item.title = self._zone_percentages_line(points)
 
-    def _sparkline_line(self, points: list[GraphPoint]) -> str:
-        if not points:
-            return "Graph: No Data"
-        vals = [p.value_mg_dl for p in points]
-        lo = min(vals)
-        hi = max(vals)
-        width = min(48, len(vals))
-        step = max(1, len(vals) // width)
-        sampled = vals[::step][-width:]
-        if hi <= lo:
-            glyphs = _SPARK_CHARS[0] * len(sampled)
-        else:
-            bins = len(_SPARK_CHARS) - 1
-            glyphs = "".join(
-                _SPARK_CHARS[int(round(((v - lo) / (hi - lo)) * bins))] for v in sampled
-            )
-        return f"Graph ({_GRAPH_HOURS}h): {glyphs}"
+    def _graph_thresholds(self) -> GraphThresholds:
+        return GraphThresholds(
+            low=self.thresholds.low,
+            high=self.thresholds.high,
+            very_high=self.thresholds.very_high,
+        )
 
     def _zone_percentages_line(self, points: list[GraphPoint]) -> str:
         """Return one-line time-in-zone summary for the current graph window."""
@@ -878,6 +876,7 @@ class GlucoseApp(rumps.App):
             self._notifier.policy.low = low
             self._notifier.policy.high = high
             self._notifier.policy.very_high = very_high
+        self._graph_view.setThresholds_(self._graph_thresholds())
         # The next rumps timer tick will re-render the title with the new
         # thresholds — we deliberately don't call ``_on_tick`` here because
         # that would touch AppKit UI off the main thread.
