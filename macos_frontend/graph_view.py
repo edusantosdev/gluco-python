@@ -46,6 +46,8 @@ _LINE_WIDTH = 1.5
 _DOT_RADIUS = 3.0
 _THRESHOLD_GUIDE_WIDTH = 1.0
 _THRESHOLD_GUIDE_DASH = [2.0, 3.0]
+_BAND_ALPHA_BASE = 0.10
+_BAND_ALPHA_ACTIVE = 0.24
 
 # Y-axis bounds in mg/dL. Pinned (not auto-fit) so the graph reads
 # consistently across glances — the eye learns where "high" is.
@@ -133,18 +135,20 @@ class GlucoseGraphView(NSView):
         t = self._thresholds
         if t is None:
             return
+        active_zone = self._zone_key_for_value(self._points[-1][1]) if self._points else None
         bands = (
-            (_Y_MIN, t.low, NSColor.systemRedColor()),
-            (t.low, t.high, NSColor.systemGreenColor()),
-            (t.high, t.very_high, NSColor.systemYellowColor()),
-            (t.very_high, _Y_MAX, NSColor.systemOrangeColor()),
+            ("L", _Y_MIN, t.low, NSColor.systemRedColor()),
+            ("G", t.low, t.high, NSColor.systemGreenColor()),
+            ("Y", t.high, t.very_high, NSColor.systemYellowColor()),
+            ("O", t.very_high, _Y_MAX, NSColor.systemOrangeColor()),
         )
-        for low, high, color in bands:
+        for zone_key, low, high, color in bands:
             if high <= low:
                 continue
             y0 = self._y_for(plot, low)
             y1 = self._y_for(plot, high)
-            color.colorWithAlphaComponent_(0.10).setFill()
+            alpha = _BAND_ALPHA_ACTIVE if zone_key == active_zone else _BAND_ALPHA_BASE
+            color.colorWithAlphaComponent_(alpha).setFill()
             NSRectFill(NSMakeRect(plot.origin.x, y0, plot.size.width, y1 - y0))
 
     def _draw_y_labels(self, plot) -> None:
@@ -225,16 +229,15 @@ class GlucoseGraphView(NSView):
 
     def _draw_latest_dot(self, plot) -> None:
         now_s = datetime.now(UTC).timestamp()
-        ts_s, value = self._points[-1]
+        ts_s, _value = self._points[-1]
         x = self._x_for(plot, ts_s, now_s)
         y = self._y_for(plot, value)
         rect = NSMakeRect(
             x - _DOT_RADIUS, y - _DOT_RADIUS, _DOT_RADIUS * 2, _DOT_RADIUS * 2
         )
         NSBezierPath.bezierPathWithOvalInRect_(rect)
-        # Fill colour matches the band the latest reading sits in, so the
-        # "where am I right now" cue mirrors the menubar title colour.
-        self._color_for_value(value).setFill()
+        # Keep the latest point visually tied to the line colour.
+        NSColor.labelColor().setFill()
         NSBezierPath.bezierPathWithOvalInRect_(rect).fill()
 
     def _draw_empty(self, bounds) -> None:
@@ -263,6 +266,19 @@ class GlucoseGraphView(NSView):
         if value > t.high:
             return NSColor.systemYellowColor()
         return NSColor.systemGreenColor()
+
+    def _zone_key_for_value(self, value: float) -> str:
+        t = self._thresholds
+        if t is None:
+            return "G"
+        if value < t.low:
+            return "L"
+        if value > t.very_high:
+            return "O"
+        if value > t.high:
+            return "Y"
+        return "G"
+
 
     @staticmethod
     def _small_text_attrs(size: float = 9) -> dict:

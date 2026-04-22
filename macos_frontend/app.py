@@ -686,8 +686,8 @@ class GlucoseApp(rumps.App):
         orange_pct = int(round((seconds_by_zone["O"] / total) * 100))
         return (
             prefix
-            f"L {low_pct}% | G {green_pct}% | "
-            f"Y {yellow_pct}% | O {orange_pct}%"
+            + f"L {low_pct}% | G {green_pct}% | "
+            + f"Y {yellow_pct}% | O {orange_pct}%"
         )
 
     def _zone_key(self, value_mg_dl: float) -> str:
