@@ -7,13 +7,14 @@
 #   scripts/install_launchagent.sh status      # is launchd running it?
 #   scripts/install_launchagent.sh logs        # tail stdout/stderr
 #
-# Only the *frontend* LaunchAgent is installed. From v0.3 onward the
-# daemon runs as a child process of the frontend under
-# ``macos_frontend.daemon_supervisor`` — so one launchd job covers
-# everything. A standalone ``com.glucobar.daemon`` template is still
-# shipped under scripts/launchagents/ for power users who want the
-# pre-0.3 split (combine with ``GLUCOBAR_SUPERVISE_DAEMON=0`` in the
-# frontend environment), but this installer does not use it.
+# Glucobar is strictly single-wrapper / single-LaunchAgent: the
+# frontend is the only thing ``launchctl bootstrap``ed, and the daemon
+# always runs as a child process of the frontend under
+# ``macos_frontend.daemon_supervisor``. There is intentionally no
+# standalone daemon LaunchAgent. Legacy labels (``com.glucobar.daemon``
+# and the pre-rename ``com.glucose-display.*`` pair) are only kept as
+# sweep targets so upgrades can bootout + delete any leftovers from
+# older installs.
 #
 # The templates under scripts/launchagents/ use __VENV_PYTHON__,
 # __REPO_ROOT__, __STATE_DIR__, and __APP_EXECUTABLE__ placeholders so

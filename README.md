@@ -8,7 +8,12 @@ A macOS menubar glucose display backed by LibreView.
   fallback for the email/password, and the menubar prompts for them on
   first launch.
 
-For design details, see [`glucose-menubar-implementation-plan.md`](./glucose-menubar-implementation-plan.md) (the phased design journal) and [`ENGINEERING.md`](./ENGINEERING.md) (how the current code fits together).
+For how the current code fits together, see
+[`ENGINEERING.md`](./ENGINEERING.md). For the design rationale
+(why this shape rather than another), see
+[`glucose-menubar-implementation-plan.md`](./glucose-menubar-implementation-plan.md).
+For the forward-looking Linux port, see
+[`kde-fedora-implementation-plan.md`](./kde-fedora-implementation-plan.md).
 
 ## ⚠️ Disclaimer
 
@@ -130,14 +135,15 @@ first, then start the menubar — the menubar probes
 .venv/bin/python -m macos_frontend    # terminal 2 — detects terminal 1
 ```
 
-If you want to disable the supervisor even when no daemon is
-listening (e.g. you're running the daemon under `systemd --user`,
-`tmux`-wrapped, or a third-party process manager) set
-`GLUCOBAR_SUPERVISE_DAEMON=0` in the frontend's environment.
+The supervisor is always wired up in the frontend — there is no
+opt-out env var. When a daemon is already listening it stays passive;
+when nothing is listening it spawns and owns the child. That keeps the
+deployment topology strictly "one wrapper, one LaunchAgent, one
+supervisor" regardless of how you launch the menubar.
 
 ## Daily Commands
 
-`scripts/install_launchagent.sh install` re-applies the frontend LaunchAgent plist, rebuilds `build/Glucobar.app` when needed, and restarts the menubar (which respawns its supervised daemon child) — use it after code or `.env` changes, or after recreating the venv. It also sweeps any pre-0.3 daemon LaunchAgents so two daemons don't race the same LibreView session.
+`scripts/install_launchagent.sh install` re-applies the frontend LaunchAgent plist, rebuilds `build/Glucobar.app` when needed, and restarts the menubar (which respawns its supervised daemon child) — use it after code or `.env` changes, or after recreating the venv. It also sweeps any legacy LaunchAgents (`com.glucobar.daemon`, `com.glucose-display.*`) left behind by older installs so two daemons can never race the same LibreView session.
 
 `scripts/install_launchagent.sh uninstall` unregisters the LaunchAgent so `launchd` stops auto-starting the menubar, removes the plist file from `~/Library/LaunchAgents/`, and leaves you to start `python -m macos_frontend` yourself (which still supervises its daemon) — or to run `install` again when you want `launchd` to manage it.
 
@@ -204,18 +210,20 @@ See `.env.example` for the full list.
 ## Credentials and Dialog Behavior
 
 - **Source of truth**: macOS Keychain only. There is no env var /
-  `.env` fallback for email or password — if the Keychain is empty the
-  menubar prompts on next launch.
-- **First launch**: the menubar app detects the empty Keychain and
-  opens a single-window LibreView email + password prompt (native
-  `NSPanel` in bundled mode, AppleScript fallback in dev mode),
-  saves to Keychain, then signals the supervised daemon to restart
-  so it re-authenticates with the new credentials right away.
-- **Changing credentials later**: click **LibreView Account** in the
-  menu.
-  - bundled launch (`install_launchagent.sh install`): native single-window email+password dialog
-  - terminal launch (`python -m macos_frontend`): AppleScript fallback prompts
-- **Terminal helpers**:
+  `.env` fallback for email or password — if the Keychain is empty
+  the menubar prompts on next launch.
+- **The credentials dialog**: a single window with stacked email +
+  password fields. In bundled mode (`install_launchagent.sh
+  install`) it's a native `NSPanel`; in terminal mode (`python -m
+  macos_frontend`) it falls back to two sequential AppleScript
+  prompts because AppKit modals don't survive in an unbundled
+  Python process. Same code path for both first-launch onboarding
+  and the **LibreView Account** menu item — onboarding just swaps
+  the window copy.
+- **After you save**: the menubar writes the Keychain entries and
+  asks the supervised daemon to restart so it re-authenticates
+  immediately with the new credentials.
+- **Terminal helpers** (alternative to the in-app prompt):
   - `scripts/set_credentials.py` — prompt + save
   - `scripts/set_credentials.py --show` — prints the stored email
   - `scripts/set_credentials.py --clear` — removes the Keychain entries
@@ -272,7 +280,7 @@ Glucobar used to be called `glucose-display`. If you're upgrading:
 - **"Another glucose daemon is already running"**: the supervisor detected another daemon holding `~/.glucobar/daemon.lock`. Quit the other one (e.g. a stray `python -m daemon` in another terminal), then relaunch the menubar.
 - **Menubar keeps restarting**: `scripts/install_launchagent.sh logs` and inspect frontend errors.
 - **Daemon exits immediately with "No LibreView credentials found"**: open the menubar app once so the first-run prompt can seed the Keychain, or run `scripts/set_credentials.py`.
-- **Dialogs do nothing in terminal mode**: expected fallback behavior; use LaunchAgent install for native dialogs.
+- **Credential dialog looks like an AppleScript prompt in terminal mode**: expected — unbundled runs fall back to `osascript` so modals don't tear the Python process down. Use `scripts/install_launchagent.sh install` for the native `NSPanel` UI.
 - **Rebuilt `.venv` or upgraded Python**: rerun `scripts/install_launchagent.sh install` to rebuild the wrapper app symlinks.
 
 ## Development

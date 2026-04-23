@@ -222,8 +222,8 @@ def test_stop_is_idempotent_in_external_mode(tmp_path):
     assert sup.mode == DaemonSupervisor.MODE_STOPPED
 
 
-def test_request_restart_prefers_active_supervisor(tmp_path, monkeypatch):
-    """``request_restart`` should call the supervisor, not launchctl."""
+def test_request_restart_uses_active_supervisor(tmp_path, monkeypatch):
+    """``request_restart`` must SIGTERM the supervised child, nothing else."""
     restart_calls: list[int] = []
 
     class FakeSup:
@@ -233,7 +233,8 @@ def test_request_restart_prefers_active_supervisor(tmp_path, monkeypatch):
 
     set_active(FakeSup())
     try:
-        # If the supervisor branch is taken, subprocess.run must not run.
+        # Strict topology: there is no launchctl fallback. Fail loudly
+        # if anyone adds a subprocess.run back in.
         import macos_frontend.daemon_supervisor as ds
         monkeypatch.setattr(
             ds.subprocess, "run",
@@ -245,26 +246,17 @@ def test_request_restart_prefers_active_supervisor(tmp_path, monkeypatch):
         set_active(None)
 
 
-def test_request_restart_falls_back_to_launchctl(monkeypatch):
-    """No active supervisor → launchctl kickstart."""
+def test_request_restart_is_noop_without_active_supervisor(monkeypatch):
+    """No active managed supervisor → silent no-op (no launchctl, no raise)."""
     set_active(None)
-    calls: list[list[str]] = []
-
-    class FakeProc:
-        returncode = 0
-        stderr = ""
 
     import macos_frontend.daemon_supervisor as ds
-    def fake_run(argv, **kwargs):  # noqa: ANN001
-        calls.append(list(argv))
-        return FakeProc()
-
-    monkeypatch.setattr(ds.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        ds.subprocess, "run",
+        lambda *a, **k: pytest.fail("launchctl fallback ran"),  # noqa: ARG005
+    )
+    # Must not raise.
     request_restart()
-    assert len(calls) == 1
-    assert calls[0][1:3] == ["kickstart", "-k"]
-    assert calls[0][3].startswith("gui/")
-    assert calls[0][3].endswith("/com.glucobar.daemon")
 
 
 def test_spawn_passes_parent_death_pipe(tmp_path):

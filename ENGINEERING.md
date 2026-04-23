@@ -130,11 +130,13 @@ AppKit setup is worse than a dead icon. The frontend plist points at
 gives AppKit a real `CFBundleIdentifier` and `LSUIElement`, which it
 needs for native alerts and notifications to behave.
 
-A legacy `com.glucobar.daemon` plist template is still shipped for
-power users who want the pre-0.3.1 split (combine with
-`GLUCOBAR_SUPERVISE_DAEMON=0` in the frontend environment), but it is
-never installed by default, and `install` actively boots out any
-existing copy so two daemons can't race the same LibreView session.
+The topology is strictly single-wrapper / single-LaunchAgent: no
+standalone `com.glucobar.daemon` plist is shipped or installed, and
+there is no opt-out env var for the supervisor. Upgrades from older
+versions (which did install a separate daemon LaunchAgent) are
+handled by `install_launchagent.sh`, which boots out and deletes any
+leftover `com.glucobar.daemon` / `com.glucose-display.*` plists so two
+daemons can never race the same LibreView session.
 
 ## 3. The daemon (`daemon/`)
 
@@ -297,9 +299,8 @@ when the Keychain is empty at launch) go through the same
 fields, then call `glucose_common.credentials.save_credentials()` and
 `macos_frontend.daemon_supervisor.request_restart()` to nudge the
 running daemon. In managed mode that SIGTERMs the child so the
-watchdog respawns it; in external mode it falls back to `launchctl
-kickstart com.glucobar.daemon` for users still running the legacy
-split topology.
+watchdog respawns it; in external mode it logs and no-ops, since
+Glucobar never owns a daemon launchd job to kickstart.
 
 The first-run prompt is deferred to a one-shot `rumps.Timer` fired
 ~300ms after the runloop starts rather than blocking inside
@@ -354,25 +355,31 @@ Draw happens on the main thread; `setPoints_` calls
 
 ### Dialogs — two-mode UX
 
-Credential prompts split by runtime mode, controlled
+All frontend dialogs split by runtime mode, controlled
 by `_is_bundled()`:
 
 - **Bundled** (launched from `Glucobar.app` under launchd):
-  AppKit sees the real `CFBundleIdentifier` / `LSUIElement`, so a
-  modal `NSPanel` with stacked fields works (we avoid `NSAlert` here
-  because it always reserves space for the app icon). The credentials
-  dialog is a single email+password window, reused for both the
-  **LibreView Account** menu item and the first-run onboarding panel
-  — the latter overrides the dialog's `title` / `body_text` /
+  AppKit sees the real `CFBundleIdentifier` / `LSUIElement`, so
+  modal `NSPanel`s work. Both the credentials prompt
+  (`_native_credentials_dialog`) and the informational one-button
+  alert (`_native_info_alert`) are `NSPanel`s rather than
+  `NSAlert`s because `NSAlert` always reserves space for the app
+  icon — until we ship a real `Glucobar.icns`, that slot paints
+  the generic Python launcher glyph. The credentials dialog is a
+  single email+password window, reused for both the **LibreView
+  Account** menu item and the first-run onboarding panel — the
+  latter overrides the dialog's `title` / `body_text` /
   `save_button` parameters for welcome framing.
 - **Unbundled** (`python -m macos_frontend` in a terminal): AppKit
   silently tears modal-showing Python processes down a few seconds
-  after `runModal()`. The menu path falls back to two sequential
-  `osascript` dialogs — `osascript` itself is a properly bundled
-  helper, so the UI renders in its process, not ours. The first-run
-  onboarding path doesn't bother with this fallback: unbundled runs
-  are developer workflows where credentials are typically already
-  seeded via `scripts/set_credentials.py`.
+  after `runModal()`. The menu credentials path falls back to two
+  sequential `osascript` dialogs — `osascript` itself is a properly
+  bundled helper, so the UI renders in its process, not ours.
+  `_show_alert` falls back to a single `osascript` display-dialog.
+  The first-run onboarding path doesn't bother with either
+  fallback: unbundled runs are developer workflows where
+  credentials are typically already seeded via
+  `scripts/set_credentials.py`.
 
 The dialog flow runs on a background thread (`_run_in_background`)
 so the rumps menu callback returns immediately and the menu doesn't
@@ -476,9 +483,10 @@ Unit tests (pytest) cover the pieces that benefit most:
   fake responses to cover warm-up, stale, fresh, and error paths.
 - `test_session_store.py` — round-trip + atomic-write behaviour.
 - `test_daemon_supervisor.py` — external-vs-managed mode detection,
-  watchdog crash-restart, EX_CONFIG sticky-state handling, the
-  `request_restart()` supervisor-vs-launchctl fallback, and the
-  `GLUCOBAR_PARENT_PIPE_FD` / `pass_fds` wiring for the
+  watchdog crash-restart, EX_CONFIG sticky-state handling,
+  `request_restart()` behavior (SIGTERM the managed child, no-op
+  otherwise — there is no launchctl fallback in the strict topology),
+  and the `GLUCOBAR_PARENT_PIPE_FD` / `pass_fds` wiring for the
   parent-death pipe. Uses DI hooks so no real subprocess is ever
   spawned.
 - `test_parent_watch.py` — verifies the daemon-side half of the

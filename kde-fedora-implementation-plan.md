@@ -1,6 +1,12 @@
 # KDE Plasma (Fedora) Implementation Plan
 
-This plan is based on the current codebase state (daemon + `macos_frontend`, including graph support via `/glucose/graph` and `macos_frontend/graph_view.py`).
+This plan sketches the Linux port against the current codebase —
+the FastAPI daemon under `daemon/`, the AppKit menubar under
+`macos_frontend/`, and the shared helpers in `glucose_common/`. The
+daemon is intentionally portable; the menubar is not. See
+[`ENGINEERING.md`](./ENGINEERING.md) for the shipped architecture
+and [`glucose-menubar-implementation-plan.md`](./glucose-menubar-implementation-plan.md)
+for the design rationale this builds on.
 
 ## Plasma Compatibility Target
 
@@ -31,7 +37,7 @@ Out of scope (initially):
 - Flatpak/Snap packaging.
 - Full distro matrix beyond Fedora (can be added after Fedora path is stable).
 
-## 2) Current Architecture Review (Updated)
+## 2) Current Architecture Review
 
 The current layout is already favorable for a Linux UI port:
 
@@ -41,25 +47,51 @@ The current layout is already favorable for a Linux UI port:
   - `GET /glucose/graph?hours=...`
   - `POST /auth/refresh`
   - `GET /health`, `GET /patient`
-- `daemon/service.py` already handles auth refresh, backoff, warm-up detection, stale detection, and graph history caching.
-- `glucose_common/credentials.py` uses `keyring` with env fallback (portable conceptually, backend differs by OS).
+- `daemon/service.py` handles auth refresh, backoff, warm-up
+  detection, stale detection, and graph history caching.
+- `daemon/parent_watch.py` arms a POSIX pipe-based parent-death
+  watch when `GLUCOBAR_PARENT_PIPE_FD` is set. On macOS the
+  supervisor passes the fd; on Linux systemd drives the lifecycle
+  directly and the env var is absent, so the module is inert.
+- `glucose_common/credentials.py` is Keychain-only on macOS; on
+  Linux `keyring` picks up Secret Service / KWallet automatically.
+  There is **no env-var fallback** for credentials — partial state
+  (email present but password missing, or vice versa) is treated
+  as absent.
 
 macOS-specific pieces are concentrated in:
 
-- `macos_frontend/app.py` (rumps/AppKit/NSPanel/AppleScript paths, title
-  pulse, status-menu alignment).
+- `macos_frontend/app.py` (rumps + AppKit `NSPanel` modals,
+  osascript fallback, title pulse, status-menu alignment,
+  first-run onboarding).
 - `macos_frontend/graph_view.py` (AppKit drawing).
-- `macos_frontend/api_client.py` (thin httpx wrapper around the daemon,
-  currently only used by the mac frontend).
-- `scripts/install_launchagent.sh` and launch agent templates.
+- `macos_frontend/api_client.py` (thin httpx wrapper around the
+  daemon, currently only used by the mac frontend).
+- `macos_frontend/daemon_supervisor.py` (spawns and watches the
+  daemon as a child process, handles `EX_CONFIG` stickiness, owns
+  the parent-death pipe's write end).
+- `scripts/install_launchagent.sh` and the single frontend
+  LaunchAgent template.
 
-The macOS frontend no longer ships a notifier module — an earlier
-iteration wrote desktop notifications via rumps + AppleScript, but it
-was removed and the associated `NOTIFY_*` env vars dropped. Any Linux
-notification story starts from scratch rather than lifting existing
+On macOS the shipped process model is **one LaunchAgent for the
+frontend** that supervises the daemon as a child process. The
+supervisor respawns on crash, treats `EX_CONFIG` as sticky, and
+tears the daemon down via SIGTERM on Quit (the parent-death pipe
+catches the cases `atexit` misses). On Linux the supervisor's job
+belongs to `systemd --user` with `Restart=on-failure`, so the
+Linux frontend does **not** spawn the daemon — it assumes systemd
+has it, probes `/health`, and renders `Connecting…` while waiting.
+
+The macOS frontend does not ship a notifier module. An earlier
+iteration wrote desktop notifications via rumps + AppleScript; it
+was removed along with the associated `NOTIFY_*` env vars in
+favour of the always-visible menubar title. The Linux notification
+story therefore starts from scratch rather than lifting shared
 code.
 
-This means a KDE/Fedora port should keep daemon and most data semantics unchanged, replacing only frontend/UI and startup integration.
+This means a KDE/Fedora port should keep daemon and most data
+semantics unchanged, replacing only frontend/UI and startup
+integration.
 
 ## 3) Target Linux Architecture
 
@@ -104,7 +136,7 @@ Plasma-latest guardrails:
 
 Goal UX:
 
-- User runs `sudo dnf install glucose-display` after enabling one package source.
+- User runs `sudo dnf install glucobar` after enabling one package source.
 
 Recommended publishing path:
 
@@ -115,7 +147,7 @@ Recommended publishing path:
 Install command shape (target experience):
 
 - One-time repo enable: `sudo dnf copr enable <owner>/<project>`
-- App install: `sudo dnf install glucose-display`
+- App install: `sudo dnf install glucobar`
 
 ## 4) Phased Implementation
 
@@ -185,7 +217,7 @@ Feature parity target with current macOS frontend:
   - Refresh (calls `POST /auth/refresh` + immediate tick; shows a
     dim `(Updated now)` / `(N min ago)` freshness hint live-updated
     on menu open)
-  - LibreLinkUp Account (email + password dialog → Keychain /
+  - LibreView Account (email + password dialog → Keychain /
     Secret Service via `keyring`)
   - Quit
 - Graph preview from `GET /glucose/graph`.
@@ -224,13 +256,26 @@ Acceptance:
 
 ### Notifications
 
-Implement Linux backend for the shared notification policy:
+Net-new on Linux — there is no macOS `NotificationPolicy` to port,
+since the previous macOS notifier was removed before 0.3. The
+Linux implementation has to decide:
 
-- Keep current `NotificationPolicy` semantics (hysteresis/cooldown/stale alerts).
-- Delivery options (ordered):
-  1. `QSystemTrayIcon.showMessage` if available.
-  2. Freedesktop notification over DBus (optional enhancement).
-  3. `notify-send` fallback (if installed).
+- Policy (lives in `frontend_common/notifier_policy.py` per
+  Phase 1): threshold bands (`THRESHOLD_*_MG_DL`),
+  hysteresis band to prevent edge flapping, per-bucket cooldown,
+  and a stale-data alert if the daemon reports `no_network` /
+  `stale` past some threshold.
+- Delivery backend (`linux_frontend/notifier_backend.py`), ordered
+  by preference:
+  1. `QSystemTrayIcon.showMessage` if the tray advertises support.
+  2. Freedesktop notification over DBus (`org.freedesktop.
+     Notifications`) for urgency and action button support.
+  3. `notify-send` fallback for minimal installs.
+
+The policy module is the expensive part; the delivery backend is
+mostly wiring. Ship the policy with unit tests first, so whichever
+delivery path lands can be swapped without re-validating the state
+machine.
 
 ### Credentials update flow
 
@@ -242,12 +287,17 @@ Use Qt dialogs in frontend:
 Fedora KDE backend reality:
 
 - `keyring` should map to Secret Service/KWallet when available.
-- If unavailable/locked, show actionable error and remind `.env` fallback.
+- If unavailable/locked, show an actionable error explaining how to
+  unlock KWallet or install a Secret Service provider. There is no
+  `.env` fallback for credentials — they're Keychain/keyring-only
+  by design, and the error path should make that explicit rather
+  than silently reading plain-text secrets.
 
 Acceptance:
 
 - Notification toggle works.
-- Alerts fire on same policy transitions as current tests define.
+- Alerts fire on the state-machine transitions defined by the new
+  `frontend_common/notifier_policy.py` unit tests.
 - Credentials save path works on a default Fedora KDE user session.
 
 ## Phase 4 - Linux startup/install scripts
@@ -255,7 +305,7 @@ Acceptance:
 Add:
 
 - `scripts/install_systemd.sh` (daemon service install/uninstall/status/logs).
-- `scripts/autostart/glucose-display-frontend.desktop.tmpl` and installer logic.
+- `scripts/autostart/glucobar-frontend.desktop.tmpl` and installer logic.
 
 Daemon user service unit should include:
 
@@ -302,7 +352,7 @@ Acceptance:
 
 Deliverables:
 
-- `packaging/fedora/glucose-display.spec`
+- `packaging/fedora/glucobar.spec`
 - `packaging/fedora/README.md` with build/publish notes
 - Optional automation for source tarball + COPR submission
 
@@ -317,15 +367,15 @@ Spec design notes:
 
 - Use `%pyproject_*` macros where possible for modern Fedora Python packaging.
 - Split optional subpackages if needed:
-  - `glucose-display` (daemon + shared core)
-  - `glucose-display-kde` (Linux Plasma frontend/autostart assets), if dependency surface needs separation.
+  - `glucobar` (daemon + shared core)
+  - `glucobar-kde` (Linux Plasma frontend/autostart assets), if dependency surface needs separation.
 - Ensure scriptlets do **not** force-start user services during RPM transaction; provide post-install guidance instead.
 
 Acceptance:
 
 - Fresh Fedora KDE host can install with:
   - `sudo dnf copr enable <owner>/<project>`
-  - `sudo dnf install glucose-display`
+  - `sudo dnf install glucobar`
 - `dnf upgrade` updates to newer app versions cleanly.
 - Uninstall removes package-owned files without leaving broken user-level config.
 
@@ -344,8 +394,8 @@ Acceptance:
 - `linux_frontend/notifier_backend.py`
 - `linux_frontend/graph_widget.py`
 - `scripts/install_systemd.sh`
-- `scripts/autostart/glucose-display-frontend.desktop.tmpl`
-- `packaging/fedora/glucose-display.spec`
+- `scripts/autostart/glucobar-frontend.desktop.tmpl`
+- `packaging/fedora/glucobar.spec`
 - `packaging/fedora/README.md`
 
 ## Modified files
@@ -366,7 +416,10 @@ and the per-platform backends.)
 - Notification delivery inconsistencies:
   - Mitigation: layered backend fallback (`showMessage` -> DBus -> `notify-send`).
 - Keyring backend differences between environments:
-  - Mitigation: keep `.env` fallback and improve user-facing errors.
+  - Mitigation: detect absence/locked state at startup and surface a
+    clear remediation message rather than falling back to plain-text
+    env vars. Document `gnome-keyring --unlock` / `kwalletmanager5`
+    steps in the troubleshooting README.
 - Dependency bloat from Qt:
   - Mitigation: keep Qt in Linux extra, not base install.
 

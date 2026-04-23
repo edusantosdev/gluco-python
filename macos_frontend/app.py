@@ -30,6 +30,8 @@ import rumps
 from rumps import events as rumps_events
 from AppKit import (
     NSApp,
+    NSApplication,
+    NSApplicationActivationPolicyAccessory,
     NSAttributedString,
     NSBackingStoreBuffered,
     NSButton,
@@ -257,6 +259,22 @@ def _is_bundled() -> bool:
     return bid == _BUNDLE_ID
 
 
+def _hide_dock_icon_by_default() -> None:
+    """Prefer menu-bar-only activation policy on every launch mode.
+
+    Bundled launches already have ``LSUIElement=true`` in ``Info.plist``,
+    but unbundled development launches (``python -m macos_frontend``)
+    would otherwise show a Dock icon. Setting Accessory keeps behaviour
+    consistent: menu bar item only, no Dock entry by default.
+    """
+    try:
+        NSApplication.sharedApplication().setActivationPolicy_(
+            NSApplicationActivationPolicyAccessory
+        )
+    except Exception:  # noqa: BLE001
+        log.debug("Could not set accessory activation policy", exc_info=True)
+
+
 # --- main-thread dispatch --------------------------------------------------
 #
 # AppKit UI calls (NSApp.runModalForWindow_, NSApp.activateIgnoringOtherApps_, etc.)
@@ -308,11 +326,11 @@ def _run_on_main_and_wait(fn):
 # Must match the menubar item label (also used as the credentials window title).
 _LIBREVIEW_ACCOUNT_TITLE = "LibreView Account"
 
-# launchd labels for the frontend LaunchAgent (still in use for the
-# "Run at Startup" menu item) and, for legacy upgrades, the pre-0.3
-# separate daemon LaunchAgent. The daemon now runs as a child process
-# of the frontend under :mod:`macos_frontend.daemon_supervisor`, so we
-# never install ``com.glucobar.daemon`` from 0.3+ onward.
+# launchd label + plist path for the one and only LaunchAgent Glucobar
+# installs: the frontend, which in turn supervises the daemon as a
+# child process via :mod:`macos_frontend.daemon_supervisor`. Used by
+# the "Run at Startup / Login" menu item's launchctl enable/disable
+# calls.
 _FRONTEND_LAUNCHD_LABEL = "com.glucobar.frontend"
 _FRONTEND_STARTUP_TITLE = "Run at Startup / Login"
 _FRONTEND_PLIST_PATH = Path.home() / "Library/LaunchAgents/com.glucobar.frontend.plist"
@@ -1504,6 +1522,7 @@ class GlucoseApp(rumps.App):
 
 def main() -> int:
     load_dotenv(_REPO_ROOT / ".env")
+    _hide_dock_icon_by_default()
     base_url = os.environ.get("DAEMON_URL", "http://127.0.0.1:8765")
     poll_interval = int(os.environ.get("FRONTEND_POLL_SECONDS", "30"))
     thresholds = ColorThresholds.from_env()
@@ -1516,27 +1535,27 @@ def main() -> int:
     # its success path calls ``request_restart()`` which clears the
     # sticky flag so the daemon respawns with the saved creds.
     #
-    # ``GLUCOBAR_SUPERVISE_DAEMON=0`` skips the supervisor entirely
-    # for users who prefer the pre-0.3.1 two-LaunchAgent model or
-    # are iterating on the daemon in another terminal and want the
-    # frontend to stay passive.
-    if os.environ.get("GLUCOBAR_SUPERVISE_DAEMON", "1") != "0":
-        from macos_frontend.daemon_supervisor import (
-            DaemonSupervisor,
-            SupervisorConfig,
-            set_active,
+    # The supervisor probes ``${DAEMON_URL}/health`` first and goes into
+    # passive "external" mode if something else is already responding
+    # (dev workflow: ``python -m daemon`` in another terminal), so there
+    # is no separate opt-out for the supervisor — it's always wired up
+    # and makes the right choice based on what's actually listening.
+    from macos_frontend.daemon_supervisor import (
+        DaemonSupervisor,
+        SupervisorConfig,
+        set_active,
+    )
+    supervisor = DaemonSupervisor(SupervisorConfig(base_url=base_url))
+    try:
+        supervisor.start()
+    except Exception:  # noqa: BLE001 — frontend must still start
+        log.exception(
+            "Daemon supervisor failed to start; continuing without one. "
+            "The frontend will keep reconnecting via DAEMON_URL."
         )
-        supervisor = DaemonSupervisor(SupervisorConfig(base_url=base_url))
-        try:
-            supervisor.start()
-        except Exception:  # noqa: BLE001 — frontend must still start
-            log.exception(
-                "Daemon supervisor failed to start; continuing without one. "
-                "The frontend will keep reconnecting via DAEMON_URL."
-            )
-        else:
-            set_active(supervisor)
-            log.info("Daemon supervisor active in %s mode", supervisor.mode)
+    else:
+        set_active(supervisor)
+        log.info("Daemon supervisor active in %s mode", supervisor.mode)
 
     log.info(
         "Starting frontend (daemon=%s, poll=%ss, "

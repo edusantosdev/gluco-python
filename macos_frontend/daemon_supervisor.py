@@ -59,7 +59,6 @@ from __future__ import annotations
 import atexit
 import logging
 import os
-import shutil
 import signal
 import subprocess
 import sys
@@ -614,39 +613,27 @@ def get_active() -> DaemonSupervisor | None:
 
 
 def request_restart(base_url: str | None = None) -> None:
-    """Ask the daemon to restart, whichever mode it's in.
+    """Ask the supervised daemon to restart.
 
-    Preference order:
+    In Glucobar's strict single-wrapper topology the daemon only
+    ever runs as a managed child of the frontend supervisor, so the
+    only supported restart path is:
+
       1. Active :class:`DaemonSupervisor` in managed mode — SIGTERM
          the child; the watchdog respawns it.
-      2. ``launchctl kickstart`` on ``com.glucobar.daemon`` — legacy
-         path for users who still run the daemon as its own
-         LaunchAgent (pre-0.3 or manual override).
 
-    Both paths are best-effort. Failures are logged, never raised:
-    the daemon will eventually pick up new state on its next restart
-    regardless, and silently-failing-to-nudge is strictly less
-    disruptive than crashing the menubar.
+    If no managed supervisor is active (external mode, or the
+    frontend hasn't finished booting yet) we log and return. The
+    daemon will pick up fresh state on its next natural restart,
+    and silently declining to nudge is strictly less disruptive
+    than crashing the menubar.
     """
     sup = get_active()
     if sup is not None and sup.is_managed:
         sup.restart()
         return
 
-    launchctl = shutil.which("launchctl") or "/bin/launchctl"
-    target = f"gui/{os.getuid()}/com.glucobar.daemon"
-    try:
-        proc = subprocess.run(  # noqa: S603 — argv composed from constants
-            [launchctl, "kickstart", "-k", target],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except Exception:  # noqa: BLE001 — best-effort
-        log.exception("launchctl kickstart failed")
-        return
-    if proc.returncode != 0:
-        log.info(
-            "launchctl kickstart %s returned rc=%s stderr=%r",
-            target, proc.returncode, (proc.stderr or "").strip(),
-        )
+    log.info(
+        "request_restart: no managed supervisor active; skipping nudge. "
+        "The daemon will pick up new state on its next natural restart."
+    )
