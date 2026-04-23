@@ -221,8 +221,8 @@ output.
 
 Essentially nothing about LibreLinkUp. It consumes the daemon's
 `Status` enum as strings and maps them to menubar glyphs. No
-credentials live in the frontend process — even the **LibreLinkUp
-Account…** flow writes straight to Keychain via
+credentials live in the frontend process — even the **LibreLinkUp Account**
+flow writes straight to Keychain via
 `glucose_common.credentials.save_credentials()`.
 
 ### Tick loop
@@ -231,22 +231,34 @@ Account…** flow writes straight to Keychain via
 `FRONTEND_POLL_SECONDS` (default 30s). Each tick:
 
 1. `DaemonClient.current()` → `CurrentReading`.
-2. Format title:
-   - `ok` → `"124 ↗"` (integer + trend arrow).
-   - `stale` with a last value → `"124 ↗*"`.
-   - Everything else → a short glyph from `_STATUS_GLYPH`.
-3. Colour the title via `NSAttributedString` on the
-   `NSStatusBarButton` (rumps' `self.title = …` only handles plain
-   text). Thresholds are in mg/dL, from env (`THRESHOLD_*_MG_DL` via
+2. Split the title into `(value, arrow, trailing)` via
+   `_title_parts`:
+   - `ok` → `("124", " ↗", "")`.
+   - `stale` with a last value → `("124", " ↗", "*")`.
+   - Everything else → a short glyph from `_STATUS_GLYPH` in the
+     `value` slot with the other two empty.
+3. Paint the three runs into the status button's
+   `attributedTitle` via `_render_title_parts` (rumps'
+   `self.title = …` only handles plain text). Thresholds are in
+   mg/dL, from env (`THRESHOLD_*_MG_DL` via
    `ColorThresholds.from_env()`), and are applied to
    `value_in_mg_per_dl` so mmol/L users still get correct colours.
-4. Update the primary (and optional detail) menu text rows — for
-   example `Updated: 1 min ago at 14:32` when the reading is live.
-5. Call `/glucose/graph` and push the points into
+4. When the current arrow is directional (`↓ ↘ ↗ ↑`), a faster
+   `rumps.Timer` (10 fps) runs `_on_arrow_pulse_tick`, fading the
+   value + arrow together under a cosine envelope; the sideways
+   `→`, the trailing `*`, and error glyphs sit still. Changing the
+   arrow resets the pulse phase so transitions enter at full alpha.
+5. Refresh the `Refresh` menu row's attributed title to `"Refresh
+   (Updated now)"` or `"Refresh (3 min ago)"`, recomputed live
+   against the last sensor timestamp rather than the daemon's
+   pre-baked `reading_age_seconds`.
+6. Call `/glucose/graph` and push the points into
    `GlucoseGraphView.setPoints_()`.
 
-Transport failures show as `⚠ Not Connected` / `⚠ Error` in the
-menubar title — the only states the daemon can't report about itself.
+Transport failures show as `⚠ Offline` / `⚠ Error` in the menubar
+title — the only states the daemon can't report about itself. A
+`DaemonNotReady` (connection refused) collapses to `Connecting…`, the
+same family as the daemon's own `starting` state.
 
 ### The dropdown graph (`macos_frontend/graph_view.py`)
 
@@ -264,8 +276,9 @@ by `_is_bundled()`:
 
 - **Bundled** (launched from `Glucose Menubar.app` under launchd):
   AppKit sees the real `CFBundleIdentifier` / `LSUIElement`, so
-  `NSAlert.runModal()` with a custom `NSStackView` accessory works.
-  The credentials dialog becomes a single email+password window.
+  a modal `NSPanel` with stacked fields works (we avoid `NSAlert` here
+  because it always reserves space for the app icon). The credentials
+  dialog is a single email+password window.
 - **Unbundled** (`python -m macos_frontend` in a terminal): AppKit
   silently tears modal-showing Python processes down a few seconds
   after `runModal()`. We fall back to two sequential `osascript`
@@ -282,13 +295,26 @@ for "run this on main, wait for it, return its value".
 
 ### Menu actions
 
-The dropdown is built in `GlucoseApp.__init__`: status rows, optional
-detail row (hidden when empty), embedded graph view, then actions.
+The dropdown is built in `GlucoseApp.__init__` and is intentionally
+minimal: an embedded graph view row, a Refresh row, a separator, a
+LibreLinkUp Account row, and rumps' standard Quit. The menubar title
+carries the full status story (number, trend arrow, or an error
+glyph), so there are no text status rows in the dropdown. The
+`Refresh` row also doubles as the freshness readout via a dim
+parenthesised suffix recomputed each time the menu opens
+(`_update_refresh_item`).
+
+Clicking the menubar pill routes through
+`_StatusItemMenuPresenter.showGlucoseMenu_` rather than rumps'
+default status-item-menu wiring, so the dropdown's leading edge can
+be pinned to the pill's leading edge (the default AppKit anchor
+uses the trailing edge and looks disconnected from a variable-width
+numeric title).
 
 | Item                       | Behaviour                                                                 |
 | -------------------------- | ------------------------------------------------------------------------- |
-| Refresh Now                | `DaemonClient.force_refresh()` → `POST /auth/refresh` on the daemon, then `_on_tick(None)` (`_session_refresh_then_tick` in `app.py`) so LibreLinkUp is re-authenticated and the title / menu / graph refresh together. |
-| LibreLinkUp Account…       | Native `NSAlert` (bundled) or sequential `osascript` prompts (unbundled) → `save_credentials()` → Keychain. |
+| Refresh (freshness hint)   | `DaemonClient.force_refresh()` → `POST /auth/refresh` on the daemon, then `_on_tick(None)` (`_session_refresh_then_tick` in `app.py`) so LibreLinkUp is re-authenticated and the title / menu / graph refresh together. |
+| LibreLinkUp Account        | Native `NSPanel` modal (bundled) or sequential `osascript` prompts (unbundled) → `save_credentials()` → Keychain. |
 | Quit                       | Standard rumps quit.                                                      |
 
 ## 5. Shared code (`glucose_common/`)
@@ -332,8 +358,11 @@ the frontend has very few knobs and they're all optional:
 - `DAEMON_URL`, `FRONTEND_POLL_SECONDS`
 - `THRESHOLD_LOW_MG_DL`, `THRESHOLD_HIGH_MG_DL`, `THRESHOLD_VERY_HIGH_MG_DL`
 
-(`README.md` also lists `NOTIFY_*` variables; nothing in the current
-`daemon/` or `macos_frontend/` tree reads them yet.)
+There's no notification subsystem — an earlier iteration shipped a
+`macos_frontend/notifier.py` with threshold/hysteresis alerts, but it
+was removed along with the corresponding `NOTIFY_*` env vars. The
+menubar title carries all status signal; adding desktop notifications
+is not a current goal (see section 10).
 
 ## 7. Testing (`tests/`)
 
@@ -372,10 +401,11 @@ That's the whole loop.
 
 ## 9. Failure modes worth knowing
 
-- **Daemon down, frontend up** → menubar shows `⚠ Not Connected`.
-  launchd should restart the daemon; opening the menu triggers an
-  immediate retry (`showGlucoseMenu_` → `_on_tick`); otherwise wait
-  for the next `FRONTEND_POLL_SECONDS` tick.
+- **Daemon down, frontend up** → menubar shows `⚠ Offline` (or
+  `Connecting…` if the socket is merely not bound yet, i.e.
+  `DaemonNotReady`). launchd should restart the daemon; opening the
+  menu triggers an immediate retry (`showGlucoseMenu_` → `_on_tick`);
+  otherwise wait for the next `FRONTEND_POLL_SECONDS` tick.
 - **Network down** → daemon flips to `no_network`, the frontend
   shows `⚠ Offline`, and the error backoff escalates from 10s to
   300s (default cap).
@@ -400,7 +430,11 @@ The plan explicitly excludes:
 - Multi-user / multi-patient support (first patient in the list
   wins).
 - Codesigning or notarization of `Glucose Menubar.app`.
-- A Linux port (the frontend is AppKit-only; the daemon would
-  port, but there's no menubar host on the other side).
+- A Linux port in-tree (the frontend is AppKit-only; the daemon is
+  already portable but there's no Linux UI here yet — see
+  `kde-fedora-implementation-plan.md` for the design sketch).
 - Menu-driven threshold editing — colours and graph bands use
   `THRESHOLD_*_MG_DL` from the environment only.
+- Desktop notifications for hypo/hyper thresholds — the previous
+  `notifier` module was removed in favour of the always-visible
+  menubar title.

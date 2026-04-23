@@ -27,20 +27,22 @@ import rumps
 from rumps import events as rumps_events
 from AppKit import (
     NSAlert,
-    NSAlertFirstButtonReturn,
     NSApp,
     NSAttributedString,
+    NSBackingStoreBuffered,
+    NSButton,
     NSColor,
     NSFont,
     NSFontAttributeName,
     NSForegroundColorAttributeName,
-    NSImage,
+    NSLayoutConstraint,
     NSMakeRect,
     NSMutableAttributedString,
+    NSPanel,
     NSSecureTextField,
-    NSStackView,
     NSTextField,
-    NSUserInterfaceLayoutOrientationVertical,
+    NSView,
+    NSWindowStyleMaskTitled,
 )
 from dotenv import load_dotenv
 from Foundation import NSBundle, NSMinY, NSObject, NSPoint
@@ -289,6 +291,9 @@ def _run_on_main_and_wait(fn):
 
 # --- native two-field credentials dialog -----------------------------------
 
+# Must match the menubar item label (also used as the credentials window title).
+_LIBRELINKUP_ACCOUNT_TITLE = "LibreLinkUp Account"
+
 
 def _credentials_dialog_prefill() -> tuple[str, str]:
     """Best-known email and password for the account dialog (Keychain, then ``.env``).
@@ -306,74 +311,146 @@ def _credentials_dialog_prefill() -> tuple[str, str]:
     return "", ""
 
 
+class _CredentialsDialogController(NSObject):
+    """Routes Save/Cancel button clicks to ``NSApp.stopModalWithCode_``.
+
+    NSButton targets must be Obj-C objects with selector methods, so we
+    can't just bind the buttons to plain Python callables.
+    """
+
+    def save_(self, _sender):  # noqa: N802  - Obj-C selector name.
+        NSApp.stopModalWithCode_(1)
+
+    def cancel_(self, _sender):  # noqa: N802  - Obj-C selector name.
+        NSApp.stopModalWithCode_(0)
+
+
 def _native_credentials_dialog(
     *,
     current_email: str = "",
     current_password: str = "",
 ) -> tuple[bool, str, str]:
-    """Show a single NSAlert with email + password fields.
+    """Show a titled modal panel with email + password fields.
 
+    We use a plain ``NSPanel`` rather than ``NSAlert`` because NSAlert
+    reserves a fixed slot for the app icon that can't be suppressed —
+    a blank ``NSImage`` leaves an empty square where the icon would go.
     Returns ``(clicked_ok, email, password)``. Must run on the main
     thread — dispatch via :func:`_run_on_main_and_wait` from worker
     threads.
     """
-    alert = NSAlert.alloc().init()
-    alert.setMessageText_("LibreLinkUp sign-in")
-    alert.setInformativeText_(
+    field_width = 320
+    h_padding = 20
+    v_padding = 20
+    # 22 is the standard NSTextField height in system alerts; anything
+    # smaller clips the baseline of the caret.
+    row_height = 22
+
+    body = NSTextField.wrappingLabelWithString_(
         "Your email and password are stored securely in your Mac Keychain."
     )
-    # A blank NSImage suppresses the default app-icon badge that NSAlert
-    # otherwise renders in the top-left corner of the dialog.
-    alert.setIcon_(NSImage.alloc().init())
-    alert.addButtonWithTitle_("Save")
-    alert.addButtonWithTitle_("Cancel")
+    body.setFont_(NSFont.systemFontOfSize_(NSFont.systemFontSize()))
+    body.setTranslatesAutoresizingMaskIntoConstraints_(False)
 
-    # 300×22 is the standard NSTextField height macOS uses in alert
-    # accessory views; anything smaller clips the baseline of the caret.
-    row_width, row_height = 300, 22
     email_field = NSTextField.alloc().initWithFrame_(
-        NSMakeRect(0, 0, row_width, row_height)
+        NSMakeRect(0, 0, field_width, row_height)
     )
     email_field.setPlaceholderString_("email@example.com")
     email_field.setStringValue_(current_email)
+    email_field.setTranslatesAutoresizingMaskIntoConstraints_(False)
+
     password_field = NSSecureTextField.alloc().initWithFrame_(
-        NSMakeRect(0, 0, row_width, row_height)
+        NSMakeRect(0, 0, field_width, row_height)
     )
     password_field.setPlaceholderString_("password")
     if current_password:
         password_field.setStringValue_(current_password)
-
-    stack = NSStackView.alloc().initWithFrame_(
-        NSMakeRect(0, 0, row_width, row_height * 2 + 8)
-    )
-    stack.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
-    stack.setSpacing_(8.0)
-    stack.addArrangedSubview_(email_field)
-    stack.addArrangedSubview_(password_field)
-    # Pin each field to the stack's full width so they don't collapse
-    # to their intrinsic zero-width content size.
-    email_field.setTranslatesAutoresizingMaskIntoConstraints_(False)
     password_field.setTranslatesAutoresizingMaskIntoConstraints_(False)
-    email_field.widthAnchor().constraintEqualToConstant_(row_width).setActive_(True)
-    password_field.widthAnchor().constraintEqualToConstant_(row_width).setActive_(True)
 
-    alert.setAccessoryView_(stack)
+    controller = _CredentialsDialogController.alloc().init()
+    save_btn = NSButton.buttonWithTitle_target_action_(
+        "Save", controller, "save:"
+    )
+    # "\r" gives the button the system default-blue style and wires
+    # Return to trigger it; "\x1b" wires Cancel to the Escape key.
+    save_btn.setKeyEquivalent_("\r")
+    save_btn.setTranslatesAutoresizingMaskIntoConstraints_(False)
+    cancel_btn = NSButton.buttonWithTitle_target_action_(
+        "Cancel", controller, "cancel:"
+    )
+    cancel_btn.setKeyEquivalent_("\x1b")
+    cancel_btn.setTranslatesAutoresizingMaskIntoConstraints_(False)
+
+    content = NSView.alloc().init()
+    content.addSubview_(body)
+    content.addSubview_(email_field)
+    content.addSubview_(password_field)
+    content.addSubview_(cancel_btn)
+    content.addSubview_(save_btn)
+
+    NSLayoutConstraint.activateConstraints_([
+        body.leadingAnchor().constraintEqualToAnchor_constant_(
+            content.leadingAnchor(), h_padding
+        ),
+        body.trailingAnchor().constraintEqualToAnchor_constant_(
+            content.trailingAnchor(), -h_padding
+        ),
+        body.topAnchor().constraintEqualToAnchor_constant_(
+            content.topAnchor(), v_padding
+        ),
+        email_field.leadingAnchor().constraintEqualToAnchor_(body.leadingAnchor()),
+        email_field.trailingAnchor().constraintEqualToAnchor_(body.trailingAnchor()),
+        email_field.topAnchor().constraintEqualToAnchor_constant_(
+            body.bottomAnchor(), 14
+        ),
+        password_field.leadingAnchor().constraintEqualToAnchor_(body.leadingAnchor()),
+        password_field.trailingAnchor().constraintEqualToAnchor_(body.trailingAnchor()),
+        password_field.topAnchor().constraintEqualToAnchor_constant_(
+            email_field.bottomAnchor(), 8
+        ),
+        save_btn.trailingAnchor().constraintEqualToAnchor_(body.trailingAnchor()),
+        save_btn.topAnchor().constraintEqualToAnchor_constant_(
+            password_field.bottomAnchor(), 16
+        ),
+        save_btn.bottomAnchor().constraintEqualToAnchor_constant_(
+            content.bottomAnchor(), -v_padding
+        ),
+        cancel_btn.trailingAnchor().constraintEqualToAnchor_constant_(
+            save_btn.leadingAnchor(), -8
+        ),
+        cancel_btn.centerYAnchor().constraintEqualToAnchor_(save_btn.centerYAnchor()),
+    ])
+
+    panel = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
+        NSMakeRect(0, 0, field_width + 2 * h_padding, 180),
+        NSWindowStyleMaskTitled,
+        NSBackingStoreBuffered,
+        False,
+    )
+    panel.setTitle_(_LIBRELINKUP_ACCOUNT_TITLE)
+    panel.setContentView_(content)
+    # Default behaviour closes the window on Cmd-W and releases it, which
+    # would dangle a freed pointer across subsequent runModal cycles.
+    panel.setReleasedWhenClosed_(False)
     # Focus the first field that still needs attention.
     if not current_email.strip():
-        first = email_field
-    elif not current_password:
-        first = password_field
+        panel.setInitialFirstResponder_(email_field)
     else:
-        first = password_field
-    alert.window().setInitialFirstResponder_(first)
+        panel.setInitialFirstResponder_(password_field)
+    panel.layoutIfNeeded()
+    panel.center()
 
     try:
         NSApp.activateIgnoringOtherApps_(True)
     except Exception:  # noqa: BLE001
         pass
 
-    response = alert.runModal()
-    ok = response == NSAlertFirstButtonReturn
+    panel.makeKeyAndOrderFront_(None)
+    try:
+        code = NSApp.runModalForWindow_(panel)
+    finally:
+        panel.orderOut_(None)
+    ok = int(code) == 1
     return (ok, email_field.stringValue() or "", password_field.stringValue() or "")
 
 
@@ -396,7 +473,7 @@ def _native_credentials_dialog(
 #   layer (wrong credentials *or* an unaccepted Terms-of-Service prompt
 #   in the FreeStyle LibreLink phone app). Both paths funnel the user
 #   toward the same two menu items (``Refresh`` and
-#   ``LibreLinkUp Account…``) so distinguishing them in the title would
+#   ``LibreLinkUp Account``) so distinguishing them in the title would
 #   only add noise.
 # * ``⚠ Error`` — unexpected/unhandled failures.
 #
@@ -603,7 +680,7 @@ class GlucoseApp(rumps.App):
         # which only refreshes once per poll.
         self._last_sensor_dt: datetime | None = None
         self._creds_item = rumps.MenuItem(
-            "LibreLinkUp Account…", callback=self._on_edit_credentials
+            _LIBRELINKUP_ACCOUNT_TITLE, callback=self._on_edit_credentials
         )
 
         # The menubar title carries the full status story (number, trend
@@ -1011,13 +1088,19 @@ class GlucoseApp(rumps.App):
         if not email:
             self._show_alert(
                 title="Email missing",
-                message="Enter the email for your LibreLinkUp account, then open LibreLinkUp Account… again.",
+                message=(
+                    "Enter the email for your LibreLinkUp account, then open "
+                    f"{_LIBRELINKUP_ACCOUNT_TITLE} again."
+                ),
             )
             return
         if not password:
             self._show_alert(
                 title="Password missing",
-                message="Enter your LibreLinkUp password, then open LibreLinkUp Account… again.",
+                message=(
+                    "Enter your LibreLinkUp password, then open "
+                    f"{_LIBRELINKUP_ACCOUNT_TITLE} again."
+                ),
             )
             return
 

@@ -6,7 +6,7 @@ Personal macOS menubar glucose display for LibreLinkUp.
 - `macos_frontend` is a menubar app (`rumps`) that reads from the daemon.
 - credentials are loaded from macOS Keychain first, then `.env`.
 
-For design details, see `[glucose-menubar-implementation-plan.md](./glucose-menubar-implementation-plan.md)`.
+For design details, see [`glucose-menubar-implementation-plan.md`](./glucose-menubar-implementation-plan.md) (the phased design journal) and [`ENGINEERING.md`](./ENGINEERING.md) (how the current code fits together).
 
 ## Requirements
 
@@ -77,19 +77,24 @@ curl -s -X POST http://127.0.0.1:8765/auth/refresh | jq
 
 
 The menubar title is the whole UI — the dropdown only carries the graph
-and action buttons. Statuses collapse to five titles:
+and action buttons. Statuses collapse to these titles:
 
 | Condition                                              | Title          |
 | ------------------------------------------------------ | -------------- |
-| `ok` (fresh reading)                                   | `124 →`        |
-| `stale` with a last-known value                        | `124 →*`       |
+| `ok` (fresh reading)                                   | `124 ↗`        |
+| `stale` with a last-known value                        | `124 ↗*`       |
 | `starting` / `warming_up` / `rate_limited` / stale w/o value | `Connecting…`  |
 | `no_network` / daemon unreachable                      | `⚠ Offline`    |
 | `auth_failed` / `tos_required`                         | `⚠ Sign In`    |
 | daemon 5xx / other unexpected failure                  | `⚠ Error`      |
 
+When the trend is directional (`↓ ↘ ↗ ↑`) the value + arrow gently pulse
+in place so a moving reading is visible at a glance; a sideways `→` and
+the trailing `*` stale flag are left static.
 
-Menu actions: **Refresh Now** (daemon `POST /auth/refresh` plus immediate UI poll), **LibreLinkUp Account…**, **Quit**.
+Menu actions: **Refresh** (daemon `POST /auth/refresh` plus immediate
+UI poll — with a dim `Updated now` / `3 min ago` freshness hint appended
+to the row), **LibreLinkUp Account**, **Quit**.
 
 ## Configuration
 
@@ -112,9 +117,6 @@ All settings come from environment variables (usually `.env`).
 - `THRESHOLD_LOW_MG_DL` (default `70`)
 - `THRESHOLD_HIGH_MG_DL` (default `180`)
 - `THRESHOLD_VERY_HIGH_MG_DL` (default `250`)
-- `NOTIFY_ENABLED` (`1`/`0`, default `1`)
-- `NOTIFY_COOLDOWN_SECONDS` (default `900`)
-- `NOTIFY_STALE_AFTER_SECONDS` (default `600`)
 - `DAEMON_STATE_DIR` (default `~/.glucose-display`)
 - `LOG_LEVEL` (default `INFO`)
 
@@ -125,14 +127,14 @@ See `.env.example` for the full list.
 - Keychain is preferred over `.env` automatically.
 - `scripts/set_credentials.py --show` prints active source.
 - `scripts/set_credentials.py --clear` removes Keychain entries.
-- **LibreLinkUp Account…** in the menubar:
+- **LibreLinkUp Account** in the menubar:
   - bundled launch (`install_launchagent.sh install`): native single-window email+password dialog
   - terminal launch (`python -m macos_frontend`): AppleScript fallback prompts
 
 ## Troubleshooting
 
 - **Account/region check fails**: run `.venv/bin/python scripts/phase0_probe.py` and fix `.env` values.
-- `**Another glucose daemon is already running`**: stop the other daemon process, then rerun install.
+- **"Another glucose daemon is already running"**: stop the other daemon process, then rerun install.
 - **Menubar keeps restarting**: `scripts/install_launchagent.sh logs` and inspect frontend errors.
 - **Dialogs do nothing in terminal mode**: expected fallback behavior; use LaunchAgent install for native dialogs.
 - **Rebuilt `.venv` or upgraded Python**: rerun `scripts/install_launchagent.sh install` to rebuild the wrapper app symlinks.

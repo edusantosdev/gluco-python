@@ -46,10 +46,18 @@ The current layout is already favorable for a Linux UI port:
 
 macOS-specific pieces are concentrated in:
 
-- `macos_frontend/app.py` (rumps/AppKit/NSAlert/AppleScript paths).
+- `macos_frontend/app.py` (rumps/AppKit/NSPanel/AppleScript paths, title
+  pulse, status-menu alignment).
 - `macos_frontend/graph_view.py` (AppKit drawing).
-- `macos_frontend/notifier.py` (rumps + AppleScript notification delivery).
+- `macos_frontend/api_client.py` (thin httpx wrapper around the daemon,
+  currently only used by the mac frontend).
 - `scripts/install_launchagent.sh` and launch agent templates.
+
+The macOS frontend no longer ships a notifier module — an earlier
+iteration wrote desktop notifications via rumps + AppleScript, but it
+was removed and the associated `NOTIFY_*` env vars dropped. Any Linux
+notification story starts from scratch rather than lifting existing
+code.
 
 This means a KDE/Fedora port should keep daemon and most data semantics unchanged, replacing only frontend/UI and startup integration.
 
@@ -142,13 +150,16 @@ Create `frontend_common/` for shared, UI-agnostic logic:
 
 - `frontend_common/api_client.py` (move from `macos_frontend/api_client.py`)
 - `frontend_common/formatting.py`:
-  - status -> title glyph logic
-  - menu status/age text helpers
+  - status -> title glyph logic (currently `_STATUS_GLYPH` + `_title_parts`)
+  - menu status/age text helpers (currently `_humanize_age`, `_refresh_secondary_label`)
 - `frontend_common/thresholds.py`:
   - env parsing/validation for low/high/very_high
-- `frontend_common/notifier_policy.py`:
-  - move policy/state machine from current `macos_frontend/notifier.py`
-  - keep backend delivery interface separate
+  - currently `ColorThresholds.from_env()` in `macos_frontend/app.py`
+- `frontend_common/notifier_policy.py` **(net-new for the Linux port)**:
+  - the previous macOS notifier was removed, so there's no shared
+    policy to extract — define the threshold/hysteresis/cooldown state
+    machine here first, then build backend adapters per platform.
+  - keep backend delivery interface separate.
 
 Refactor macOS frontend to consume shared modules with no behavior change.
 
@@ -170,15 +181,27 @@ Add package:
 Feature parity target with current macOS frontend:
 
 - Tray title/status updates from `GET /glucose/current`.
-- Menu actions:
-  - Refresh Now
-  - Force Re-Authenticate
-  - Notifications (toggle)
-  - Update Credentials...
-  - Set Thresholds...
+- Menu actions matching the current macOS dropdown:
+  - Refresh (calls `POST /auth/refresh` + immediate tick; shows a
+    dim `(Updated now)` / `(N min ago)` freshness hint live-updated
+    on menu open)
+  - LibreLinkUp Account (email + password dialog → Keychain /
+    Secret Service via `keyring`)
   - Quit
 - Graph preview from `GET /glucose/graph`.
 - Same status semantics (`starting`, `ok`, `stale`, `warming_up`, etc.).
+
+Items that are **not** in the current macOS frontend and that the KDE
+port should treat as net-new scope rather than parity work:
+
+- Notifications (toggle / threshold alerts) — the macOS notifier was
+  removed; bringing them back on Linux means implementing the policy
+  module from scratch (see Phase 1).
+- Menu-driven threshold editing — thresholds come from
+  `THRESHOLD_*_MG_DL` env vars only; do the same on Linux unless a UI
+  is explicitly in scope.
+- Force Re-Authenticate as a distinct menu item — on macOS this is
+  folded into Refresh (which already hits `/auth/refresh`).
 
 KDE-specific implementation notes:
 
@@ -329,9 +352,12 @@ Acceptance:
 
 - `pyproject.toml` (dependency split and packages list)
 - `macos_frontend/app.py` (imports from shared modules)
-- `macos_frontend/notifier.py` (or split into policy + mac backend adapter)
 - `README.md` (Linux section)
 - tests under `tests/` for shared logic
+
+(`macos_frontend/notifier.py` no longer exists — don't plan an edit
+there. Any notifier work happens in the new `frontend_common/` module
+and the per-platform backends.)
 
 ## 6) Risks and Mitigations
 

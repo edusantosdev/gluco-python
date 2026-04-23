@@ -98,7 +98,9 @@ Handle the failure modes that only reveal themselves over days of real use: sens
 
 ### Phase 4 — macOS polish (optional, a weekend)
 
-Launch-at-login via LaunchAgent plist. Credentials / thresholds editable from the menubar instead of only via `.env`. Notifications for hypo/hyper thresholds. Colour-coded menubar text for low/in-range/high states. A thin `.app` wrapper bundle to give AppKit a real `CFBundleIdentifier` + `LSUIElement` — without it, `NSAlert.runModal()` and `NSUserNotification` silently tear the launchd-spawned Python process down, so the menu Edit Credentials / Set Thresholds items look like they do nothing. The bundle lives at `build/Glucose Menubar.app/` and is rebuilt by `scripts/install_launchagent.sh install`. This is where the app graduates from "works for me" to "I actually rely on it."
+Launch-at-login via LaunchAgent plist. Credentials editable from the menubar instead of only via `.env` (writing directly to macOS Keychain). Colour-coded menubar text for low/in-range/high states via `THRESHOLD_*_MG_DL` env vars. A thin `.app` wrapper bundle to give AppKit a real `CFBundleIdentifier` + `LSUIElement` — without it, the modal credentials dialog silently tears the launchd-spawned Python process down, so the menu LibreLinkUp Account item looks like it does nothing. The bundle lives at `build/Glucose Menubar.app/` and is rebuilt by `scripts/install_launchagent.sh install`. This is where the app graduates from "works for me" to "I actually rely on it."
+
+Note: earlier drafts planned threshold editing from the menu and hypo/hyper desktop notifications. Both were dropped — thresholds stay env-only (simple, static, no state to persist across restarts), and the menubar title itself is treated as the alert surface (`⚠ Offline` / `⚠ Sign In`, colour-coded number, pulsing trend arrow). A standalone `notifier` module existed briefly and was removed.
 
 ### Phase 5 — Linux port (a few evenings)
 
@@ -740,9 +742,9 @@ If you end up patching `pylibrelinkup` locally, keep the patches in a separate f
 
 A LaunchAgent plist at `~/Library/LaunchAgents/com.glucose-display.daemon.plist` starts the daemon on login with `KeepAlive` set to true. The frontend is a separate LaunchAgent that runs the rumps app. Keeping them as separate agents means a frontend crash doesn't kill the daemon, and launchd's `ThrottleInterval` (default 10s) prevents a crash-loop from burning CPU.
 
-Credentials live in macOS Keychain, not `.env`, once the app is packaged. The `keyring` Python library handles this cross-platform. `scripts/set_credentials.py` is a one-shot helper that prompts for email/password and writes them to Keychain; the daemon's `config.py` reads Keychain first and falls back to `.env` only if the Keychain entry is absent, so development and production use the same code path. The frontend also exposes an **Update Credentials…** menu item that writes to the same Keychain service; when the frontend is launched via the LaunchAgent (i.e. inside the bundle) that item opens a single native `NSAlert` with email + password fields, and when launched from a terminal it falls back to two sequential AppleScript dialogs.
+Credentials live in macOS Keychain, not `.env`, once the app is packaged. The `keyring` Python library handles this cross-platform. `scripts/set_credentials.py` is a one-shot helper that prompts for email/password and writes them to Keychain; the daemon's `config.py` reads Keychain first and falls back to `.env` only if the Keychain entry is absent, so development and production use the same code path. The frontend also exposes a **LibreLinkUp Account** menu item that writes to the same Keychain service; when the frontend is launched via the LaunchAgent (i.e. inside the bundle) that item opens a single modal `NSPanel` with email + password fields, and when launched from a terminal it falls back to two sequential AppleScript dialogs.
 
-**Why the frontend launches out of a `.app` wrapper bundle.** AppKit bakes a handful of features against the containing bundle's `Info.plist`: `NSUserNotification` delivery checks `CFBundleIdentifier`, `NSAlert.runModal()` from a menu callback needs a registered bundle to not get killed by launchd when it tries to present a modal, and `LSUIElement=true` is what makes the process menubar-only (no Dock icon). Running `python -m macos_frontend` straight out of the venv gives you none of those. The fix is a thin wrapper bundle at `build/Glucose Menubar.app/`, rendered by `scripts/install_launchagent.sh install`, structured as:
+**Why the frontend launches out of a `.app` wrapper bundle.** AppKit bakes a handful of features against the containing bundle's `Info.plist`: modal panels (`NSPanel.runModalForWindow_`, `NSAlert.runModal()`) need a registered bundle to not get killed by launchd when they present a modal, and `LSUIElement=true` is what makes the process menubar-only (no Dock icon). Running `python -m macos_frontend` straight out of the venv gives you none of those. The fix is a thin wrapper bundle at `build/Glucose Menubar.app/`, rendered by `scripts/install_launchagent.sh install`, structured as:
 
 ```
 Glucose Menubar.app/
@@ -784,7 +786,7 @@ Things that don't need answers now but will come up:
 
 **Units.** This plan assumes mg/dL throughout. If you're in a mmol/L region, add a `UNITS` env var and convert in the daemon response. Don't do unit conversion in the frontend — keep it a dumb display.
 
-**Alarms.** The Libre app's alarm system is local-only and tied to the phone. If you want desktop alarms for hypos, they have to be implemented here. Basic threshold alarms in the daemon (fire a macOS notification via `pync` or similar) are easy; matching Abbott's sophistication isn't.
+**Alarms.** The Libre app's alarm system is local-only and tied to the phone. If you want desktop alarms for hypos, they have to be implemented here. An earlier iteration shipped a rumps + AppleScript notifier module with hysteresis + cooldown; it was removed because the menubar title (colour-coded number, pulsing trend arrow, `⚠ Offline` / `⚠ Sign In` glyphs) already reads as the alert surface for a personal always-visible tool. Revisit if you actually miss the noise.
 
 ---
 
