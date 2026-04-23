@@ -259,8 +259,8 @@ def _run_on_main_and_wait(fn):
 # --- native two-field credentials dialog -----------------------------------
 
 # Menu row title shown before the gray username suffix.
-_LOGOUT_MENU_PRIMARY_TITLE = "Logout of Libreview account"
-_SIGN_IN_MENU_PRIMARY_TITLE = "Sign In to Libreview account"
+_SIGN_OUT_MENU_PRIMARY_TITLE = "Sign Out of LibreView Account"
+_SIGN_IN_MENU_PRIMARY_TITLE = "Sign In to LibreView Account"
 
 # Plain title used when the credentials dialog is opened without custom copy.
 _LIBREVIEW_ACCOUNT_TITLE = "LibreView Account"
@@ -845,7 +845,7 @@ class GlucoseApp(rumps.App):
         # which only refreshes once per poll.
         self._last_sensor_dt: datetime | None = None
         self._creds_item = rumps.MenuItem(
-            _LOGOUT_MENU_PRIMARY_TITLE, callback=self._on_logout_credentials
+            _SIGN_OUT_MENU_PRIMARY_TITLE, callback=self._on_logout_credentials
         )
         self._startup_item = rumps.MenuItem(
             _FRONTEND_STARTUP_TITLE, callback=self._on_toggle_startup
@@ -1250,7 +1250,7 @@ class GlucoseApp(rumps.App):
         email = creds.email.strip() if creds is not None else ""
         # Keep the account action congruent with the menubar headline:
         # whenever the title says "Sign In", the menu row must also be a
-        # sign-in/fix-account action (never logout), even if a stale daemon
+        # sign-in/fix-account action (never sign out), even if a stale daemon
         # session still exists somewhere in the background.
         needs_sign_in = (getattr(self, "_title_value", "") == "⚠ Sign In") or (not email) or self._last_daemon_status in {
             "auth_failed",
@@ -1262,7 +1262,7 @@ class GlucoseApp(rumps.App):
             primary = _SIGN_IN_MENU_PRIMARY_TITLE
             callback = self._on_first_run_credentials if not email else self._on_edit_credentials
         else:
-            primary = _LOGOUT_MENU_PRIMARY_TITLE
+            primary = _SIGN_OUT_MENU_PRIMARY_TITLE
             callback = self._on_logout_credentials
         if self._creds_item.callback is not callback:
             self._creds_item.set_callback(callback)
@@ -1298,6 +1298,13 @@ class GlucoseApp(rumps.App):
         except Exception as e:  # noqa: BLE001
             log.warning("LibreView session refresh failed: %s", e)
         self._on_tick(None)
+
+    def _set_signing_in_state(self) -> None:
+        """Render an explicit in-progress auth state in the menubar title."""
+        # Keep account-row logic and headline in sync while auth is in flight.
+        self._last_daemon_status = "starting"
+        self._apply_title_parts("Signing in...", "", "", color=None)
+        self._update_credentials_item()
 
     def _check_sign_in_status_after_restart(self) -> str | None:
         """Poll daemon status briefly after a credential save + restart.
@@ -1349,7 +1356,7 @@ class GlucoseApp(rumps.App):
         self._session_refresh_then_tick(log_label="Refresh")
 
     def _on_logout_credentials(self, _sender) -> None:
-        log.info("Logout clicked")
+        log.info("Sign out clicked")
         _run_in_background(self._logout_credentials_impl)
 
     def _on_first_run_credentials(self, _sender) -> None:
@@ -1362,7 +1369,7 @@ class GlucoseApp(rumps.App):
         clear_credentials()
         if load_credentials() is not None:
             self._show_alert(
-                title="Couldn't log out",
+                title="Couldn't sign out",
                 message=(
                     "Glucobar couldn't remove your LibreView credentials from "
                     "the macOS Keychain. Please unlock Keychain Access and try again."
@@ -1373,7 +1380,7 @@ class GlucoseApp(rumps.App):
         _kickstart_daemon()
         self._on_tick(None)
         self._update_credentials_item()
-        # Reuse the first-run onboarding dialog immediately after logout.
+        # Reuse the first-run onboarding dialog immediately after sign-out.
         self._first_run_credentials_impl()
 
     def _on_first_run_tick(self, _timer) -> None:
@@ -1443,6 +1450,7 @@ class GlucoseApp(rumps.App):
                 continue
             log.info("Saved LibreView credentials from first-run prompt")
             self._update_credentials_item()
+            self._set_signing_in_state()
             # Daemon is in the supervisor's sticky EX_CONFIG state; nudge
             # it so it respawns now with the new Keychain entry instead of
             # waiting for the user to poke the menu.
@@ -1567,6 +1575,7 @@ class GlucoseApp(rumps.App):
                 )
                 continue
             self._update_credentials_item()
+            self._set_signing_in_state()
             # Kick the daemon so it re-authenticates with the new credentials
             # right away, instead of either waiting for its next poll (if
             # already running under the old creds) or for launchd's throttled
