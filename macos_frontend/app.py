@@ -37,13 +37,12 @@ from AppKit import (
     NSMakeRect,
     NSMutableAttributedString,
     NSSecureTextField,
-    NSStringDrawingUsesLineFragmentOrigin,
     NSStackView,
     NSTextField,
     NSUserInterfaceLayoutOrientationVertical,
 )
 from dotenv import load_dotenv
-from Foundation import NSBundle, NSMinY, NSObject, NSPoint, NSString
+from Foundation import NSBundle, NSMinY, NSObject, NSPoint
 
 # Allow ``python -m macos_frontend`` and ``python macos_frontend/app.py``.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -61,7 +60,6 @@ from macos_frontend.api_client import (  # noqa: E402
     DaemonUnreachable,
 )
 from macos_frontend.graph_view import GlucoseGraphView, GraphThresholds  # noqa: E402
-from macos_frontend.notifier import NotificationPolicy, Notifier  # noqa: E402
 
 # Graph appears at the top of the dropdown above the freshness/units rows.
 # 8 hours is the sweet spot between "see today's pattern" and "fits in a
@@ -70,60 +68,9 @@ from macos_frontend.notifier import NotificationPolicy, Notifier  # noqa: E402
 _GRAPH_HOURS = 8
 _GRAPH_WIDTH = 320
 _GRAPH_HEIGHT = 110
-# Horizontal tweak for status-menu popup (negative = left, in **points**); see
-# ``_StatusItemMenuPresenter``. On Retina, 1pt is often 2px.
-_MENU_POPUP_X_NUDGE_PT = -2.0
-# Used to measure ``NSAttributedString`` breadth for menu alignment (wide max, single line).
-_MENU_TITLE_MEASURE_SIZE = (2000.0, 500.0)
-
-
-def _ns_utf16_len(s: str) -> int:
-    """Cocoa string length in UTF-16 code units (``NSRange`` indexing)."""
-    return int(NSString.stringWithString_(s).length())
-
-
-def _attributed_title_breadth(attr) -> float:
-    """Horizontal span of ``attr`` for layout (same font as menubar title)."""
-    if attr is None or attr.length() == 0:
-        return 0.0
-    rect = attr.boundingRectWithSize_options_(
-        _MENU_TITLE_MEASURE_SIZE,
-        NSStringDrawingUsesLineFragmentOrigin,
-    )
-    return float(rect.size.width)
-
-
-def _value_center_x_in_status_button(button, app: "GlucoseApp") -> float:
-    """Horizontal center of the value run in ``button`` coordinates.
-
-    Assumes the menubar title is one left-to-right line ``value + arrow + trailing``
-    centered as a whole in the status bar button. Uses the live
-    ``attributedTitle()`` so digit count (``90`` vs ``105``), font, and kerning
-    match what is drawn; falls back to plain ``NSString`` sizing when there is
-    no attributed title yet.
-    """
-    bw = float(button.bounds().size.width)
-    value = app._title_value
-    suffix = f"{app._title_arrow}{app._title_trailing}"
-    attr = button.attributedTitle()
-    if attr is not None and attr.length() > 0:
-        full_w = _attributed_title_breadth(attr)
-        vlen = _ns_utf16_len(value) if value else 0
-        vlen = min(vlen, attr.length())
-        value_w = _attributed_title_breadth(
-            attr.attributedSubstringFromRange_((0, vlen))
-        )
-    else:
-        font = NSFont.menuBarFontOfSize_(0)
-        attrs = {NSFontAttributeName: font}
-        full = f"{value}{suffix}"
-        full_w = float(NSString.stringWithString_(full).sizeWithAttributes_(attrs).width)
-        value_w = (
-            float(NSString.stringWithString_(value).sizeWithAttributes_(attrs).width)
-            if value
-            else 0.0
-        )
-    return (bw - full_w) / 2.0 + value_w / 2.0
+# Optional horizontal offset from the status button's leading edge (points); see
+# ``_StatusItemMenuPresenter``.
+_MENU_POPUP_X_NUDGE_PT = 0.0
 
 # Title pulse animation. The value and arrow gently fade together on a
 # shared cosine curve whenever the reading's trend is directional
@@ -164,16 +111,13 @@ log = logging.getLogger("glucose.frontend")
 # When running unbundled (e.g. ``python -m macos_frontend`` from a
 # terminal during development), the Python process has no bundle
 # identity. Several AppKit UI APIs refuse to work in that context —
-# ``rumps.notification`` is the documented example (see
-# ``notifier.py``), and ``NSAlert.runModal`` / ``rumps.Window.run``
-# behave similarly: the call appears to start, but AppKit silently
-# marks the process as misbehaving and ``launchd`` tears it down a
-# few seconds later. There's no crash report, just a clean exit and a
-# relaunch — which from the user's perspective looks like "the menu
-# went dead and nothing happened". In that mode we fall back to
-# ``osascript``, which shells out to a properly bundled helper
-# process (``System Events``) to host the dialog. That's also the
-# fallback the notification backend uses, for the same reason.
+# ``NSAlert.runModal`` / ``rumps.Window.run`` behave similarly: the call
+# appears to start, but AppKit silently marks the process as misbehaving
+# and ``launchd`` tears it down a few seconds later. There's no crash report,
+# just a clean exit and a relaunch — which from the user's perspective looks
+# like "the menu went dead and nothing happened". In that mode we fall back to
+# ``osascript``, which shells out to a properly bundled helper process
+# (``System Events``) to host the dialog.
 #
 # Either way, the dialog flow runs on a background thread so the
 # rumps menu callback returns immediately (otherwise the menu stays
@@ -405,39 +349,6 @@ def _native_credentials_dialog(
     return (ok, email_field.stringValue() or "", password_field.stringValue() or "")
 
 
-def _native_single_field_dialog(
-    *,
-    title: str,
-    message: str,
-    default_text: str = "",
-    ok_label: str = "OK",
-    cancel_label: str = "Cancel",
-) -> tuple[bool, str]:
-    """Show a native NSAlert with a single text field. Main-thread only."""
-    alert = NSAlert.alloc().init()
-    alert.setMessageText_(title)
-    alert.setInformativeText_(message)
-    alert.addButtonWithTitle_(ok_label)
-    alert.addButtonWithTitle_(cancel_label)
-
-    row_width, row_height = 300, 22
-    field = NSTextField.alloc().initWithFrame_(
-        NSMakeRect(0, 0, row_width, row_height)
-    )
-    field.setStringValue_(default_text)
-    alert.setAccessoryView_(field)
-    alert.window().setInitialFirstResponder_(field)
-
-    try:
-        NSApp.activateIgnoringOtherApps_(True)
-    except Exception:  # noqa: BLE001
-        pass
-
-    response = alert.runModal()
-    ok = response == NSAlertFirstButtonReturn
-    return (ok, field.stringValue() or "")
-
-
 # Menubar title for each non-``ok`` daemon status. When status == "ok"
 # (or "stale" with a last-known value) we render the number directly.
 #
@@ -592,14 +503,14 @@ _DETAIL_TEXT = {
 
 
 class _StatusItemMenuPresenter(NSObject):
-    """Pops up the main ``NSMenu`` so it lines up under the glucose value.
+    """Pops up the main ``NSMenu`` with its leading edge on the pill's leading edge.
 
     rumps attaches the menu with ``NSStatusItem.setMenu:``, which anchors the
     panel to the trailing edge of the pill and looks visually disconnected from
     the number. We clear that menu, handle the button action, and call
-    ``popUpMenuPositioningItem:atLocation:inView:`` with an x derived from the
-    button's live ``attributedTitle()`` (or the same strings + menubar font) so
-    the anchor moves when the digit count or trend suffix changes.
+    ``popUpMenuPositioningItem:atLocation:inView:`` with the menu's **leading**
+    edge at the status button's **leading** edge (in button coordinates), plus
+    ``_MENU_POPUP_X_NUDGE_PT``.
     """
 
     def initWithGlucoseApp_(self, app: "GlucoseApp"):
@@ -615,16 +526,12 @@ class _StatusItemMenuPresenter(NSObject):
         button = sender
         ns_menu.sizeToFit()
         menu_w = float(ns_menu.size().width)
-        value_center_x = _value_center_x_in_status_button(button, app)
-        x = value_center_x - menu_w / 2.0 + _MENU_POPUP_X_NUDGE_PT
+        x = _MENU_POPUP_X_NUDGE_PT
         bw = float(button.bounds().size.width)
         if menu_w <= bw:
-            # Cap the right edge so the menu stays inside the pill; do **not**
-            # floor x to 0 — that would erase a negative nudge whenever the
-            # ideal origin is already left of the button (common when the menu
-            # is wider than the status item).
+            # Cap the right edge so the menu stays inside the pill when it is
+            # narrower than the status item.
             x = min(x, bw - menu_w)
-        # Wide menu: leave x as-is (often negative) so nudge and centering apply.
         loc = NSPoint(x, NSMinY(button.bounds()))
         ns_menu.popUpMenuPositioningItem_atLocation_inView_(None, loc, button)
 
@@ -635,25 +542,16 @@ class GlucoseApp(rumps.App):
         base_url: str,
         poll_interval: int,
         thresholds: ColorThresholds,
-        notifier: Notifier | None = None,
     ):
         super().__init__("···", quit_button="Quit")
         self.poll_interval = poll_interval
         self.thresholds = thresholds
-        self._notifier = notifier
 
         self._reading_updated_item = rumps.MenuItem("Connecting…")
         self._refresh_item = rumps.MenuItem("Refresh Now", callback=self._on_refresh)
         self._reauth_item = rumps.MenuItem("Force Re-Authenticate", callback=self._on_reauth)
-        self._notifs_item = rumps.MenuItem(
-            "Notifications", callback=self._on_toggle_notifications
-        )
-        self._notifs_item.state = 1 if (notifier and notifier.enabled) else 0
         self._creds_item = rumps.MenuItem(
             "Update Credentials…", callback=self._on_edit_credentials
-        )
-        self._thresholds_item = rumps.MenuItem(
-            "Set Thresholds…", callback=self._on_edit_thresholds
         )
 
         # Graph item at the top of the dropdown. ``rumps.MenuItem`` wraps an
@@ -675,9 +573,7 @@ class GlucoseApp(rumps.App):
             self._refresh_item,
             self._reauth_item,
             None,
-            self._notifs_item,
             self._creds_item,
-            self._thresholds_item,
         ]
 
         self._client = DaemonClient(base_url=base_url)
@@ -919,13 +815,6 @@ class GlucoseApp(rumps.App):
         u_line, _units_line = _reading_menu_labels(reading)
         self._reading_updated_item.title = u_line
 
-        if self._notifier is not None:
-            self._notifier.handle(
-                value_mg_dl=reading.value_in_mg_per_dl,
-                reading_age_seconds=reading.reading_age_seconds,
-                status=reading.status,
-            )
-
         self._refresh_graph()
 
     def _refresh_graph(self) -> None:
@@ -963,23 +852,6 @@ class GlucoseApp(rumps.App):
         except Exception as e:  # noqa: BLE001
             log.warning("Re-auth failed: %s", e)
         self._on_tick(None)
-
-    # --- Preferences ---
-
-    def _on_toggle_notifications(self, sender) -> None:
-        if self._notifier is None:
-            _run_in_background(
-                lambda: self._show_alert(
-                    title="Notifications Unavailable",
-                    message="Notifier was not initialised. Restart the frontend.",
-                )
-            )
-            return
-        self._notifier.enabled = not self._notifier.enabled
-        sender.state = 1 if self._notifier.enabled else 0
-        log.info(
-            "Notifications %s", "enabled" if self._notifier.enabled else "disabled"
-        )
 
     def _on_edit_credentials(self, _sender) -> None:
         log.info("Update credentials clicked")
@@ -1071,96 +943,17 @@ class GlucoseApp(rumps.App):
         else:
             _osascript_alert(title=title, message=message)
 
-    def _on_edit_thresholds(self, _sender) -> None:
-        log.info("Set thresholds clicked")
-        _run_in_background(self._edit_thresholds_impl)
-
-    def _edit_thresholds_impl(self) -> None:
-        """Prompt for the three colour thresholds. Session-only; see below."""
-        default_text = (
-            f"{int(self.thresholds.low)},"
-            f"{int(self.thresholds.high)},"
-            f"{int(self.thresholds.very_high)}"
-        )
-        message = (
-            "Three numbers separated by commas: low, high, very_high.\n"
-            f"Current: {int(self.thresholds.low)}, "
-            f"{int(self.thresholds.high)}, "
-            f"{int(self.thresholds.very_high)}.\n\n"
-            "To persist across restarts, set THRESHOLD_LOW_MG_DL, "
-            "THRESHOLD_HIGH_MG_DL, THRESHOLD_VERY_HIGH_MG_DL in .env."
-        )
-
-        if _is_bundled():
-            ok, response = _run_on_main_and_wait(
-                lambda: _native_single_field_dialog(
-                    title="Glucose Thresholds (mg/dL)",
-                    message=message,
-                    default_text=default_text,
-                    ok_label="Apply",
-                )
-            )
-        else:
-            ok, response = _osascript_dialog(
-                title="Glucose Thresholds (mg/dL)",
-                message=message,
-                default_text=default_text,
-                ok="Apply",
-            )
-        if not ok:
-            return
-        try:
-            parts = [float(x.strip()) for x in response.split(",")]
-            if len(parts) != 3:
-                raise ValueError("expected three numbers")
-            low, high, very_high = parts
-            if not (low < high < very_high):
-                raise ValueError("must satisfy low < high < very_high")
-        except Exception as e:  # noqa: BLE001
-            self._show_alert(title="Invalid Thresholds", message=str(e))
-            return
-
-        # Mutating shared state from a worker thread: the frontend is
-        # single-reader on the main thread (the poll tick), and these
-        # attribute writes are atomic in CPython, so we don't need a
-        # lock for correctness. Worst case: one tick uses old thresholds.
-        self.thresholds = ColorThresholds(low=low, high=high, very_high=very_high)
-        if self._notifier is not None:
-            self._notifier.policy.low = low
-            self._notifier.policy.high = high
-            self._notifier.policy.very_high = very_high
-        self._graph_view.setThresholds_(self._graph_thresholds())
-        # The next rumps timer tick will re-render the title with the new
-        # thresholds — we deliberately don't call ``_on_tick`` here because
-        # that would touch AppKit UI off the main thread.
-
-
-def _build_notifier(thresholds: ColorThresholds) -> Notifier:
-    stale_after = int(os.environ.get("NOTIFY_STALE_AFTER_SECONDS", str(10 * 60)))
-    cooldown = int(os.environ.get("NOTIFY_COOLDOWN_SECONDS", str(15 * 60)))
-    enabled = os.environ.get("NOTIFY_ENABLED", "1") not in ("0", "false", "False", "")
-    policy = NotificationPolicy(
-        low=thresholds.low,
-        high=thresholds.high,
-        very_high=thresholds.very_high,
-        cooldown_seconds=cooldown,
-        stale_after_seconds=stale_after,
-    )
-    return Notifier(policy, enabled=enabled)
-
 
 def main() -> int:
     load_dotenv(_REPO_ROOT / ".env")
     base_url = os.environ.get("DAEMON_URL", "http://127.0.0.1:8765")
     poll_interval = int(os.environ.get("FRONTEND_POLL_SECONDS", "30"))
     thresholds = ColorThresholds.from_env()
-    notifier = _build_notifier(thresholds)
     log.info(
-        "Starting frontend (daemon=%s, poll=%ss, notifications=%s, "
+        "Starting frontend (daemon=%s, poll=%ss, "
         "thresholds: <%g red, %g–%g green, %g–%g yellow, >%g orange)",
         base_url,
         poll_interval,
-        "on" if notifier.enabled else "off",
         thresholds.low,
         thresholds.low,
         thresholds.high,
@@ -1172,7 +965,6 @@ def main() -> int:
         base_url=base_url,
         poll_interval=poll_interval,
         thresholds=thresholds,
-        notifier=notifier,
     ).run()
     return 0
 
