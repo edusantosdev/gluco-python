@@ -52,6 +52,7 @@ _THRESHOLD_GUIDE_DOT = 2.0
 _THRESHOLD_GUIDE_GAP = 3.0
 _BAND_ALPHA_BASE = 0.10
 _BAND_ALPHA_ACTIVE = 0.24
+_THRESHOLD_GUIDE_ALPHA = 0.55
 
 # Y-axis bounds in mg/dL. Pinned (not auto-fit) so the graph reads
 # consistently across glances — the eye learns where "high" is.
@@ -146,12 +147,7 @@ class GlucoseGraphView(NSView):
         if t is None:
             return
         active_zone = self._zone_key_for_value(self._points[-1][1]) if self._points else None
-        bands = (
-            ("L", _Y_MIN, t.low, NSColor.systemRedColor()),
-            ("G", t.low, t.high, NSColor.systemGreenColor()),
-            ("Y", t.high, t.very_high, NSColor.systemYellowColor()),
-            ("O", t.very_high, _Y_MAX, NSColor.systemOrangeColor()),
-        )
+        bands = self._band_specs()
         for zone_key, low, high, color in bands:
             if high <= low:
                 continue
@@ -162,19 +158,19 @@ class GlucoseGraphView(NSView):
             NSRectFill(NSMakeRect(plot.origin.x, y0, plot.size.width, y1 - y0))
 
     def _draw_threshold_guides(self, plot) -> None:
-        """Draw dotted guides on the green-zone boundaries (low/high)."""
+        """Draw dotted guides on the active zone's lower/upper boundaries."""
         t = self._thresholds
         if t is None:
             return
-        guides = (
-            (t.low, NSColor.systemGreenColor()),
-            (t.high, NSColor.systemGreenColor()),
-        )
-        for value, color in guides:
+        active_band = self._active_band_for_latest()
+        if active_band is None:
+            return
+        _zone_key, low, high, color = active_band
+        for value in (low, high):
             if not (_Y_MIN <= value <= _Y_MAX):
                 continue
             y = self._y_for(plot, value)
-            color.colorWithAlphaComponent_(0.55).setStroke()
+            color.colorWithAlphaComponent_(_THRESHOLD_GUIDE_ALPHA).setStroke()
             x = plot.origin.x
             x_end = plot.origin.x + plot.size.width
             while x < x_end:
@@ -293,6 +289,29 @@ class GlucoseGraphView(NSView):
         if value > t.high:
             return "Y"
         return "G"
+
+    def _band_specs(self) -> tuple[tuple[str, float, float, NSColor], ...]:
+        t = self._thresholds
+        if t is None:
+            return ()
+        return (
+            ("L", _Y_MIN, t.low, NSColor.systemRedColor()),
+            ("G", t.low, t.high, NSColor.systemGreenColor()),
+            ("Y", t.high, t.very_high, NSColor.systemYellowColor()),
+            ("O", t.very_high, _Y_MAX, NSColor.systemOrangeColor()),
+        )
+
+    def _active_band_for_latest(self) -> tuple[str, float, float, NSColor] | None:
+        if not self._points:
+            return None
+        active_zone = self._zone_key_for_value(self._points[-1][1])
+        for band in self._band_specs():
+            zone_key, low, high, _color = band
+            if high <= low:
+                continue
+            if zone_key == active_zone:
+                return band
+        return None
 
 
     @staticmethod
