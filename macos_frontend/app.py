@@ -49,7 +49,10 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from glucose_common.credentials import save_credentials  # noqa: E402
+from glucose_common.credentials import (  # noqa: E402
+    load_credentials,
+    save_credentials,
+)
 from macos_frontend.api_client import (  # noqa: E402
     CurrentReading,
     DaemonClient,
@@ -58,7 +61,7 @@ from macos_frontend.api_client import (  # noqa: E402
 )
 from macos_frontend.graph_view import GlucoseGraphView, GraphThresholds  # noqa: E402
 
-# Graph appears at the top of the dropdown above the freshness/units rows.
+# Graph sits in the dropdown under the freshness and units text rows.
 # 8 hours is the sweet spot between "see today's pattern" and "fits in a
 # menu item without dominating the screen". Width is wide enough to make
 # minute-resolution shape visible but not so wide that the menu overflows.
@@ -285,9 +288,26 @@ def _run_on_main_and_wait(fn):
 # --- native two-field credentials dialog -----------------------------------
 
 
+def _credentials_dialog_prefill() -> tuple[str, str]:
+    """Best-known email and password for the account dialog (Keychain, then ``.env``).
+
+    Password is only returned when it comes from the same source as the email
+    (see :func:`load_credentials` — no mixing Keychain email with env password).
+    """
+    env_email = (os.environ.get("LIBRELINKUP_EMAIL") or "").strip() or None
+    env_password = os.environ.get("LIBRELINKUP_PASSWORD") or None
+    loaded = load_credentials(env_email, env_password)
+    if loaded is not None:
+        return loaded.email.strip(), loaded.password
+    if env_email:
+        return env_email, env_password or ""
+    return "", ""
+
+
 def _native_credentials_dialog(
     *,
     current_email: str = "",
+    current_password: str = "",
 ) -> tuple[bool, str, str]:
     """Show a single NSAlert with email + password fields.
 
@@ -315,6 +335,8 @@ def _native_credentials_dialog(
         NSMakeRect(0, 0, row_width, row_height)
     )
     password_field.setPlaceholderString_("password")
+    if current_password:
+        password_field.setStringValue_(current_password)
 
     stack = NSStackView.alloc().initWithFrame_(
         NSMakeRect(0, 0, row_width, row_height * 2 + 8)
@@ -331,10 +353,14 @@ def _native_credentials_dialog(
     password_field.widthAnchor().constraintEqualToConstant_(row_width).setActive_(True)
 
     alert.setAccessoryView_(stack)
-    # Focus the empty field so typing starts in the right place.
-    alert.window().setInitialFirstResponder_(
-        password_field if current_email else email_field
-    )
+    # Focus the first field that still needs attention.
+    if not current_email.strip():
+        first = email_field
+    elif not current_password:
+        first = password_field
+    else:
+        first = password_field
+    alert.window().setInitialFirstResponder_(first)
 
     try:
         NSApp.activateIgnoringOtherApps_(True)
@@ -493,7 +519,7 @@ _DETAIL_TEXT = {
     "warming_up": "Try Again in a Few Minutes",
     "sensor_ended": "Replace Sensor in FreeStyle LibreLink",
     "no_network": "Check Wi-Fi and Try Refresh Now",
-    "auth_failed": "Choose “Sign In Again” below",
+    "auth_failed": "Choose “Refresh LibreLinkUp Session” below",
     "tos_required": "Finish any prompts in FreeStyle LibreLink",
     "rate_limited": "Retrying automatically",
 }
@@ -545,13 +571,17 @@ class GlucoseApp(rumps.App):
         self.thresholds = thresholds
 
         self._reading_updated_item = rumps.MenuItem("Connecting…")
+        self._units_item = rumps.MenuItem("—")
         self._refresh_item = rumps.MenuItem("Refresh Now", callback=self._on_refresh)
-        self._reauth_item = rumps.MenuItem("Sign In Again", callback=self._on_reauth)
+        self._reauth_item = rumps.MenuItem(
+            "Refresh LibreLinkUp Session", callback=self._on_reauth
+        )
         self._creds_item = rumps.MenuItem(
             "LibreLinkUp Account…", callback=self._on_edit_credentials
         )
 
-        # Graph item at the top of the dropdown. ``rumps.MenuItem`` wraps an
+        # Status lines first, then the graph — no separator between text and
+        # graph so it reads as one block. ``rumps.MenuItem`` wraps an
         # ``NSMenuItem`` (exposed as ``._menuitem``); attaching a custom NSView
         # via ``setView_`` is the supported way to embed non-text content in
         # an AppKit menu. The empty title is ignored once a view is present.
@@ -563,9 +593,9 @@ class GlucoseApp(rumps.App):
         self._graph_item._menuitem.setView_(self._graph_view)
 
         self.menu = [
-            self._graph_item,
-            None,
             self._reading_updated_item,
+            self._units_item,
+            self._graph_item,
             None,
             self._refresh_item,
             self._reauth_item,
@@ -790,12 +820,14 @@ class GlucoseApp(rumps.App):
             log.warning("Daemon unreachable: %s", e)
             self._apply_title_parts("⚠ Not Connected", "", "", color=None)
             self._reading_updated_item.title = "Can't reach FreeStyle LibreLink"
+            self._units_item.title = "—"
             self._graph_view.setPoints_([])
             return
         except DaemonError as e:
             log.warning("Daemon error: %s", e)
             self._apply_title_parts("⚠ Error", "", "", color=None)
             self._reading_updated_item.title = "Couldn't load your reading"
+            self._units_item.title = "—"
             self._graph_view.setPoints_([])
             return
 
@@ -809,8 +841,9 @@ class GlucoseApp(rumps.App):
             color = _color_for(value_for_color, self.thresholds)
         self._apply_title_parts(value_part, arrow_part, trailing_part, color=color)
 
-        u_line, _units_line = _reading_menu_labels(reading)
+        u_line, units_line = _reading_menu_labels(reading)
         self._reading_updated_item.title = u_line
+        self._units_item.title = units_line
 
         self._refresh_graph()
 
@@ -864,12 +897,18 @@ class GlucoseApp(rumps.App):
         the osascript two-dialog flow which delegates UI to a properly
         bundled helper process.
         """
+        pref_email, pref_password = _credentials_dialog_prefill()
         if _is_bundled():
             ok, email, password = _run_on_main_and_wait(
-                lambda: _native_credentials_dialog()
+                lambda: _native_credentials_dialog(
+                    current_email=pref_email,
+                    current_password=pref_password,
+                )
             )
         else:
-            ok, email, password = self._osascript_credentials_prompt()
+            ok, email, password = self._osascript_credentials_prompt(
+                default_email=pref_email,
+            )
         if not ok:
             return
 
@@ -903,15 +942,18 @@ class GlucoseApp(rumps.App):
             title="Sign-in saved",
             message=(
                 "Saved to your Mac Keychain. "
-                "Choose “Sign In Again” from the menu to connect with these details now."
+                "Choose “Refresh LibreLinkUp Session” from the menu to connect with these details now."
             ),
         )
 
-    def _osascript_credentials_prompt(self) -> tuple[bool, str, str]:
+    def _osascript_credentials_prompt(
+        self, *, default_email: str = ""
+    ) -> tuple[bool, str, str]:
         """Unbundled-mode fallback: two sequential osascript dialogs."""
         ok, email = _osascript_dialog(
             title="LibreLinkUp email",
             message="Enter the email you use for LibreLinkUp.",
+            default_text=default_email,
             ok="Next",
         )
         if not ok:

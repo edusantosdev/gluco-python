@@ -1,6 +1,6 @@
 """Custom ``NSView`` that renders the recent glucose trace inside a menu item.
 
-Lives in the menubar dropdown above the existing text rows. The drawing is
+Lives in the menubar dropdown below the freshness / units text rows. The drawing is
 deliberately Spartan: faint horizontal threshold bands, a single polyline
 through the cached readings, and a coloured dot on the latest sample. No
 animation, no interaction — a glance graph, not an explorer.
