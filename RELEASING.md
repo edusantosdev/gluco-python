@@ -113,7 +113,7 @@ open -a Glucobar
 - `brew uninstall --cask glucobar` and reinstall
 - `brew upgrade --cask glucobar` from previous version
 - Validate Keychain prompt and first-run credentials flow
-- Confirm menubar **Run at Startup / Login** toggles correctly
+- Confirm menubar **Open at Login** toggles correctly
 
 ## Notes
 

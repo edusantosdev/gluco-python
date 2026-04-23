@@ -107,7 +107,7 @@ To verify your account + region end-to-end against LibreView:
 menubar at login, and the menubar supervises the daemon as a child
 process (respawns it on crash, tears it down on Quit).
 
-**Run at Startup / Login** is a real `launchctl` toggle for that
+**Open at Login** is a real `launchctl` toggle for that
 frontend LaunchAgent (`com.glucobar.frontend`):
 
 - checked = startup at next login is enabled
@@ -229,7 +229,7 @@ the trailing `*` stale flag are left static.
 
 Menu actions: **Refresh** (daemon `POST /auth/refresh` plus immediate
 UI poll — with a dim `Updated now` / `3 min ago` freshness hint appended
-to the row), **Run at Startup / Login** (enables/disables next-login
+to the row), **Open at Login** (enables/disables next-login
 autostart for `com.glucobar.frontend`), **LibreView Account**, **Quit**.
 
 ## Configuration

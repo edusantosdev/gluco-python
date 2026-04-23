@@ -260,6 +260,7 @@ def _run_on_main_and_wait(fn):
 
 # Menu row title shown before the gray username suffix.
 _LOGOUT_MENU_PRIMARY_TITLE = "Logout of Libreview account"
+_SIGN_IN_MENU_PRIMARY_TITLE = "Sign In to Libreview account"
 
 # Plain title used when the credentials dialog is opened without custom copy.
 _LIBREVIEW_ACCOUNT_TITLE = "LibreView Account"
@@ -274,10 +275,10 @@ _SIGN_IN_DIALOG_BUTTON = "Sign In"
 # launchd label + plist path for the one and only LaunchAgent Glucobar
 # installs: the frontend, which in turn supervises the daemon as a
 # child process via :mod:`macos_frontend.daemon_supervisor`. Used by
-# the "Run at Startup / Login" menu item's launchctl enable/disable
+# the "Open at Login" menu item's launchctl enable/disable
 # calls.
 _FRONTEND_LAUNCHD_LABEL = "com.glucobar.frontend"
-_FRONTEND_STARTUP_TITLE = "Run at Startup / Login"
+_FRONTEND_STARTUP_TITLE = "Open at Login"
 _FRONTEND_PLIST_PATH = Path.home() / "Library/LaunchAgents/com.glucobar.frontend.plist"
 
 
@@ -836,6 +837,7 @@ class GlucoseApp(rumps.App):
         self.thresholds = thresholds
 
         self._daemon_unreachable = False
+        self._last_daemon_status: str = "starting"
         self._refresh_item = rumps.MenuItem("Refresh", callback=self._on_refresh)
         # Latest sensor timestamp (UTC datetime) used to recompute the
         # refresh row label live when the menu opens, instead
@@ -1103,6 +1105,7 @@ class GlucoseApp(rumps.App):
         # even if an externally-managed daemon still has a live session.
         if not _has_stored_credentials():
             self._daemon_unreachable = False
+            self._last_daemon_status = "logged_out"
             self._last_sensor_dt = None
             self._apply_title_parts("⚠ Sign In", "", "", color=None)
             self._graph_view.setPoints_([])
@@ -1118,6 +1121,7 @@ class GlucoseApp(rumps.App):
             # reads like a WAN outage.
             log.warning("Daemon not accepting connections yet: %s", e)
             self._daemon_unreachable = True
+            self._last_daemon_status = "starting"
             self._apply_title_parts("Connecting…", "", "", color=None)
             self._graph_view.setPoints_([])
             self._update_refresh_item()
@@ -1125,6 +1129,7 @@ class GlucoseApp(rumps.App):
         except DaemonUnreachable as e:
             log.warning("Daemon unreachable: %s", e)
             self._daemon_unreachable = True
+            self._last_daemon_status = "no_network"
             # Folded into the same label as ``no_network`` — from the
             # user's perspective it's the same failure ("we can't see
             # your data right now"), and keeping two near-synonymous
@@ -1136,12 +1141,14 @@ class GlucoseApp(rumps.App):
         except DaemonError as e:
             log.warning("Daemon error: %s", e)
             self._daemon_unreachable = False
+            self._last_daemon_status = "error"
             self._apply_title_parts("⚠ Error", "", "", color=None)
             self._graph_view.setPoints_([])
             self._update_refresh_item()
             return
 
         self._daemon_unreachable = False
+        self._last_daemon_status = reading.status
         value_part, arrow_part, trailing_part = _title_parts(reading)
         # Only colour when we actually have a numeric value to evaluate.
         # Stale readings still get coloured (the value is the most recent
@@ -1238,18 +1245,34 @@ class GlucoseApp(rumps.App):
         self._refresh_item._menuitem.setAttributedTitle_(attr)
 
     def _update_credentials_item(self) -> None:
-        """Render logout row as ``Logout ... (email)`` with a dimmed email."""
+        """Render account row title/callback based on current auth state."""
         creds = load_credentials()
         email = creds.email.strip() if creds is not None else ""
+        # Keep the account action congruent with the menubar headline:
+        # whenever the title says "Sign In", the menu row must also be a
+        # sign-in/fix-account action (never logout), even if a stale daemon
+        # session still exists somewhere in the background.
+        needs_sign_in = (getattr(self, "_title_value", "") == "⚠ Sign In") or (not email) or self._last_daemon_status in {
+            "auth_failed",
+            "tos_required",
+            "logged_out",
+        }
         menu_item = self._creds_item._menuitem
+        if needs_sign_in:
+            primary = _SIGN_IN_MENU_PRIMARY_TITLE
+            callback = self._on_first_run_credentials if not email else self._on_edit_credentials
+        else:
+            primary = _LOGOUT_MENU_PRIMARY_TITLE
+            callback = self._on_logout_credentials
+        if self._creds_item.callback is not callback:
+            self._creds_item.set_callback(callback)
         if not email:
             menu_item.setAttributedTitle_(None)
-            self._creds_item.title = _LOGOUT_MENU_PRIMARY_TITLE
+            self._creds_item.title = primary
             return
-        self._apply_credentials_attr_title(email)
+        self._apply_credentials_attr_title(primary, email)
 
-    def _apply_credentials_attr_title(self, email: str) -> None:
-        primary = _LOGOUT_MENU_PRIMARY_TITLE
+    def _apply_credentials_attr_title(self, primary: str, email: str) -> None:
         joiner = " ("
         closer = ")"
         full = f"{primary}{joiner}{email}{closer}"
@@ -1328,6 +1351,12 @@ class GlucoseApp(rumps.App):
     def _on_logout_credentials(self, _sender) -> None:
         log.info("Logout clicked")
         _run_in_background(self._logout_credentials_impl)
+
+    def _on_first_run_credentials(self, _sender) -> None:
+        _run_in_background(self._first_run_credentials_impl)
+
+    def _on_edit_credentials(self, _sender) -> None:
+        _run_in_background(self._edit_credentials_impl)
 
     def _logout_credentials_impl(self) -> None:
         clear_credentials()
@@ -1421,6 +1450,9 @@ class GlucoseApp(rumps.App):
             status = self._check_sign_in_status_after_restart()
             if not self._handle_post_sign_in_status(status):
                 continue
+            # Immediately repaint headline state so the menubar title
+            # doesn't lag behind the success modal copy.
+            self._on_tick(None)
             self._show_alert(
                 title="You're signed in",
                 message=(
@@ -1543,6 +1575,8 @@ class GlucoseApp(rumps.App):
             status = self._check_sign_in_status_after_restart()
             if not self._handle_post_sign_in_status(status):
                 continue
+            # Keep menu-bar state in sync with this success path.
+            self._on_tick(None)
             self._show_alert(
                 title="Sign-in saved",
                 message=(
