@@ -19,7 +19,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import objc
@@ -376,18 +376,36 @@ def _native_credentials_dialog(
 # (or "stale" with a last-known value) we render the number directly.
 #
 # The goal is a title that is readable at a glance without opening the
-# dropdown — short but not cryptic. We keep the ``⚠`` prefix for any
-# state that demands user attention, so the eye can spot "something's
-# wrong" even without reading the words.
+# dropdown — short but not cryptic, and tight enough that the user never
+# has to open the menu to tell what's going on. Statuses are collapsed
+# into a small handful of outcomes:
+#
+# * ``Connecting…`` — any transient "waiting for data" state (daemon
+#   starting up, sensor still warming up, backend told us to slow down,
+#   or a stale cache with no value yet). No ``⚠`` because there's nothing
+#   for the user to do.
+# * ``⚠ Offline`` — we can't reach the data source right now.
+# * ``⚠ Sign In`` — the user has to go fix something at the sign-in
+#   layer (wrong credentials *or* an unaccepted Terms-of-Service prompt
+#   in the FreeStyle LibreLink phone app). Both paths funnel the user
+#   toward the same two menu items (``Refresh`` and
+#   ``LibreLinkUp Account…``) so distinguishing them in the title would
+#   only add noise.
+# * ``⚠ Error`` — unexpected/unhandled failures.
+#
+# ``sensor_ended`` is declared in the daemon's ``Status`` enum but no
+# code path currently sets it; it's mapped here defensively so that, if
+# it's ever wired up, the menubar falls back to the generic error glyph
+# rather than the bare ``⚠``.
 _STATUS_GLYPH = {
-    "starting": "Starting…",
-    "stale": "Stale",  # only used when the stale reading has no last value
-    "warming_up": "Warming Up",
-    "sensor_ended": "⚠ Sensor Ended",
+    "starting": "Connecting…",
+    "stale": "Connecting…",  # only used when stale has no last value
+    "warming_up": "Connecting…",
+    "rate_limited": "Connecting…",
     "no_network": "⚠ Offline",
     "auth_failed": "⚠ Sign In",
-    "tos_required": "⚠ Accept Terms",
-    "rate_limited": "⚠ Slow Down",
+    "tos_required": "⚠ Sign In",
+    "sensor_ended": "⚠ Error",
 }
 
 
@@ -459,23 +477,6 @@ def _color_for(value_mg_dl: float, t: ColorThresholds):
     return NSColor.systemGreenColor()
 
 
-def _reading_menu_labels(reading: CurrentReading) -> tuple[str, str | None]:
-    """Primary menu row and optional second row (error detail only)."""
-    if reading.status in ("ok", "stale"):
-        local_hhmm = _to_local_hhmm(reading.sensor_timestamp)
-        age = _humanize_age(reading.reading_age_seconds)
-        if local_hhmm != "—":
-            updated_line = f"Updated: {age} at {local_hhmm}"
-        else:
-            updated_line = f"Updated: {age}"
-        return (updated_line, None)
-    status = _STATUS_TEXT.get(reading.status, "Unavailable")
-    detail = _DETAIL_TEXT.get(reading.status, "")
-    if detail:
-        return (status, detail)
-    return (status, None)
-
-
 def _humanize_age(age_seconds: int | None) -> str:
     if age_seconds is None:
         return "Unknown"
@@ -502,25 +503,14 @@ def _to_local_hhmm(timestamp_iso: str | None) -> str:
         return "—"
 
 
-_STATUS_TEXT = {
-    "starting": "Connecting…",
-    "warming_up": "Sensor Warming Up",
-    "sensor_ended": "Sensor Ended",
-    "no_network": "No Internet Connection",
-    "auth_failed": "Sign-In Required",
-    "tos_required": "Open FreeStyle LibreLink to Accept Terms",
-    "rate_limited": "Please Wait a Moment",
-}
-
-_DETAIL_TEXT = {
-    "starting": "Getting First Reading",
-    "warming_up": "Try Again in a Few Minutes",
-    "sensor_ended": "Replace Sensor in FreeStyle LibreLink",
-    "no_network": "Check Wi-Fi and Try Refresh Now",
-    "auth_failed": "Choose “Refresh Now” below",
-    "tos_required": "Finish any prompts in FreeStyle LibreLink",
-    "rate_limited": "Retrying automatically",
-}
+def _parse_sensor_timestamp(timestamp_iso: str | None) -> datetime | None:
+    """Parse the daemon's UTC sensor timestamp into an aware ``datetime``."""
+    if not timestamp_iso:
+        return None
+    try:
+        return datetime.fromisoformat(timestamp_iso.replace("Z", "+00:00"))
+    except Exception:  # noqa: BLE001
+        return None
 
 
 class _StatusItemMenuPresenter(NSObject):
@@ -548,6 +538,11 @@ class _StatusItemMenuPresenter(NSObject):
         # waiting for the next periodic tick.
         if getattr(app, "_daemon_unreachable", False):
             app._on_tick(None)
+        # Recompute the "Refresh (… ago)" label and its enabled state
+        # against the wall clock at open time, otherwise both would only
+        # advance once per ``poll_interval`` and the row could read e.g.
+        # "(Just now)" while disabled long after the reading went stale.
+        app._update_refresh_item()
         ns_menu = app._menu._menu
         button = sender
         ns_menu.sizeToFit()
@@ -580,19 +575,24 @@ class GlucoseApp(rumps.App):
         self.poll_interval = poll_interval
         self.thresholds = thresholds
 
-        self._reading_updated_item = rumps.MenuItem("Connecting…")
-        self._detail_item = rumps.MenuItem("")
         self._daemon_unreachable = False
-        self._refresh_item = rumps.MenuItem("Refresh Now", callback=self._on_refresh)
+        self._refresh_item = rumps.MenuItem("Refresh", callback=self._on_refresh)
+        # Latest sensor timestamp (UTC datetime) used to recompute the
+        # "Refresh (… ago)" label live when the menu opens, instead
+        # of relying on the daemon's pre-baked ``reading_age_seconds``
+        # which only refreshes once per poll.
+        self._last_sensor_dt: datetime | None = None
         self._creds_item = rumps.MenuItem(
             "LibreLinkUp Account…", callback=self._on_edit_credentials
         )
 
-        # Status lines first, then the graph — no separator between text and
-        # graph so it reads as one block. ``rumps.MenuItem`` wraps an
-        # ``NSMenuItem`` (exposed as ``._menuitem``); attaching a custom NSView
-        # via ``setView_`` is the supported way to embed non-text content in
-        # an AppKit menu. The empty title is ignored once a view is present.
+        # The menubar title carries the full status story (number, trend
+        # arrow, or an error glyph), so the dropdown holds no text row —
+        # just the graph and the two action buttons. ``rumps.MenuItem``
+        # wraps an ``NSMenuItem`` (exposed as ``._menuitem``); attaching
+        # a custom NSView via ``setView_`` is the supported way to embed
+        # non-text content in an AppKit menu. The empty title is ignored
+        # once a view is present.
         self._graph_view = GlucoseGraphView.alloc().initWithFrame_hours_(
             NSMakeRect(0, 0, _GRAPH_WIDTH, _GRAPH_HEIGHT), _GRAPH_HOURS
         )
@@ -600,10 +600,7 @@ class GlucoseApp(rumps.App):
         self._graph_item = rumps.MenuItem("")
         self._graph_item._menuitem.setView_(self._graph_view)
 
-        self._detail_item._menuitem.setHidden_(True)
         self.menu = [
-            self._reading_updated_item,
-            self._detail_item,
             self._graph_item,
             None,
             self._refresh_item,
@@ -827,20 +824,20 @@ class GlucoseApp(rumps.App):
         except DaemonUnreachable as e:
             log.warning("Daemon unreachable: %s", e)
             self._daemon_unreachable = True
-            self._apply_title_parts("⚠ Not Connected", "", "", color=None)
-            self._reading_updated_item.title = "Can't reach FreeStyle LibreLink"
-            self._detail_item.title = ""
-            self._detail_item._menuitem.setHidden_(True)
+            # Folded into the same label as ``no_network`` — from the
+            # user's perspective it's the same failure ("we can't see
+            # your data right now"), and keeping two near-synonymous
+            # glyphs is exactly the clutter we just trimmed.
+            self._apply_title_parts("⚠ Offline", "", "", color=None)
             self._graph_view.setPoints_([])
+            self._update_refresh_item()
             return
         except DaemonError as e:
             log.warning("Daemon error: %s", e)
             self._daemon_unreachable = False
             self._apply_title_parts("⚠ Error", "", "", color=None)
-            self._reading_updated_item.title = "Couldn't load your reading"
-            self._detail_item.title = ""
-            self._detail_item._menuitem.setHidden_(True)
             self._graph_view.setPoints_([])
+            self._update_refresh_item()
             return
 
         self._daemon_unreachable = False
@@ -854,15 +851,8 @@ class GlucoseApp(rumps.App):
             color = _color_for(value_for_color, self.thresholds)
         self._apply_title_parts(value_part, arrow_part, trailing_part, color=color)
 
-        primary, secondary = _reading_menu_labels(reading)
-        self._reading_updated_item.title = primary
-        if secondary:
-            self._detail_item.title = secondary
-            self._detail_item._menuitem.setHidden_(False)
-        else:
-            self._detail_item.title = ""
-            self._detail_item._menuitem.setHidden_(True)
-
+        self._last_sensor_dt = _parse_sensor_timestamp(reading.sensor_timestamp)
+        self._update_refresh_item()
         self._refresh_graph()
 
     def _refresh_graph(self) -> None:
@@ -889,6 +879,38 @@ class GlucoseApp(rumps.App):
             very_high=self.thresholds.very_high,
         )
 
+    def _current_reading_age_seconds(self) -> int | None:
+        """Live age of the last sensor reading, computed from now.
+
+        Returns ``None`` when no sensor timestamp has been recorded yet
+        (e.g. before the first successful poll, or after a daemon error
+        cleared the cached value).
+        """
+        if self._last_sensor_dt is None:
+            return None
+        delta = datetime.now(timezone.utc) - self._last_sensor_dt
+        return int(delta.total_seconds())
+
+    def _update_refresh_item(self) -> None:
+        """Sync the ``Refresh`` row's label and enabled state to the live age.
+
+        The button is held disabled while the most recent reading is
+        younger than one minute — the LibreLinkUp backend pushes a new
+        sample roughly once a minute, so a refresh inside that window
+        can't return anything new and would just hammer the API.
+        """
+        age = self._current_reading_age_seconds()
+        if age is not None and age >= 0:
+            self._refresh_item.title = f"Refresh ({_humanize_age(age)})"
+        else:
+            self._refresh_item.title = "Refresh"
+        if age is None or age >= 60:
+            if self._refresh_item.callback is not self._on_refresh:
+                self._refresh_item.set_callback(self._on_refresh)
+        else:
+            if self._refresh_item.callback is not None:
+                self._refresh_item.set_callback(None)
+
     def _session_refresh_then_tick(self, *, log_label: str) -> None:
         """POST /auth/refresh on the daemon, then pull current reading + graph."""
         log.info("%s", log_label)
@@ -899,7 +921,7 @@ class GlucoseApp(rumps.App):
         self._on_tick(None)
 
     def _on_refresh(self, _sender) -> None:
-        self._session_refresh_then_tick(log_label="Refresh Now")
+        self._session_refresh_then_tick(log_label="Refresh")
 
     def _on_edit_credentials(self, _sender) -> None:
         log.info("Update credentials clicked")
@@ -960,7 +982,7 @@ class GlucoseApp(rumps.App):
             title="Sign-in saved",
             message=(
                 "Saved to your Mac Keychain. "
-                "Choose “Refresh Now” from the menu to connect with these details now."
+                "Choose “Refresh” from the menu to connect with these details now."
             ),
         )
 

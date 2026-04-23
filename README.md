@@ -76,19 +76,17 @@ curl -s -X POST http://127.0.0.1:8765/auth/refresh | jq
 ## Menubar Status Titles
 
 
-| Status         | Title              |
-| -------------- | ------------------ |
-| `ok`           | `124 →`            |
-| `stale`        | `124 →*`           |
-| `starting`     | `Starting…`        |
-| `warming_up`   | `Warming Up`       |
-| `sensor_ended` | `⚠ Sensor Ended`   |
-| `no_network`   | `⚠ Offline`        |
-| `auth_failed`  | `⚠ Sign In`        |
-| `tos_required` | `⚠ Accept Terms`   |
-| `rate_limited` | `⚠ Slow Down`      |
-| daemon offline | `⚠ Not Connected`  |
-| daemon error   | `⚠ Error`        |
+The menubar title is the whole UI — the dropdown only carries the graph
+and action buttons. Statuses collapse to five titles:
+
+| Condition                                              | Title          |
+| ------------------------------------------------------ | -------------- |
+| `ok` (fresh reading)                                   | `124 →`        |
+| `stale` with a last-known value                        | `124 →*`       |
+| `starting` / `warming_up` / `rate_limited` / stale w/o value | `Connecting…`  |
+| `no_network` / daemon unreachable                      | `⚠ Offline`    |
+| `auth_failed` / `tos_required`                         | `⚠ Sign In`    |
+| daemon 5xx / other unexpected failure                  | `⚠ Error`      |
 
 
 Menu actions: **Refresh Now** (daemon `POST /auth/refresh` plus immediate UI poll), **LibreLinkUp Account…**, **Quit**.

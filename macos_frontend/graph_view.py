@@ -39,10 +39,11 @@ from AppKit import (
 log = logging.getLogger("glucose.frontend.graph")
 
 # --- layout (in points) ---
-# One inset value for every edge: the plot uses the inner rect inset by ``m``
-# on left, right, and top; the bottom ``m`` of the view is reserved for the
-# time-axis labels only, so the chart runs from y = m to y = height − m.
-_PLOT_EDGE_INSET = 12.0
+# The plot uses an inner rect: horizontal inset on left/right, vertical on
+# top and bottom. The bottom band is reserved for time-axis labels only, so
+# the chart runs from y = m_y to y = height − m_y.
+_PLOT_EDGE_INSET_X = 16.0
+_PLOT_EDGE_INSET_Y = 12.0
 
 _LINE_WIDTH = 1.5
 _DOT_RADIUS = 3.0
@@ -97,12 +98,13 @@ class GlucoseGraphView(NSView):
     def drawRect_(self, _dirty):  # noqa: N802 - Obj-C selector
         try:
             bounds = self.bounds()
-            m = _PLOT_EDGE_INSET
+            mx = _PLOT_EDGE_INSET_X
+            my = _PLOT_EDGE_INSET_Y
             plot = NSMakeRect(
-                m,
-                m,
-                bounds.size.width - 2.0 * m,
-                bounds.size.height - 2.0 * m,
+                mx,
+                my,
+                bounds.size.width - 2.0 * mx,
+                bounds.size.height - 2.0 * my,
             )
             if plot.size.width <= 0 or plot.size.height <= 0:
                 return
@@ -114,7 +116,7 @@ class GlucoseGraphView(NSView):
             else:
                 self._draw_line(plot)
                 self._draw_latest_dot(plot)
-                # Bottom margin strip [0, m] — only when there is a trace to frame.
+                # Bottom margin strip [0, m_y] — only when there is a trace to frame.
                 self._draw_x_labels(plot)
         except Exception:  # noqa: BLE001
             # Never let a draw callback crash the whole menubar app.
@@ -191,13 +193,13 @@ class GlucoseGraphView(NSView):
         if self._hours >= 2:
             labels.append((0.5, f"-{self._hours // 2}h"))
         labels.append((1.0, "Now"))
-        # Sit inside the bottom margin band (same _PLOT_EDGE_INSET as L/R/T).
+        # Sit inside the bottom margin band (height = _PLOT_EDGE_INSET_Y).
         sample = NSAttributedString.alloc().initWithString_attributes_(
             "-8h", attrs
         )
         label_h = float(sample.size().height)
-        m = _PLOT_EDGE_INSET
-        axis_y = max(0.0, (m - label_h) / 2.0)
+        m_y = _PLOT_EDGE_INSET_Y
+        axis_y = max(0.0, (m_y - label_h) / 2.0)
         for frac, text in labels:
             x = plot.origin.x + frac * plot.size.width
             attr = NSAttributedString.alloc().initWithString_attributes_(text, attrs)
@@ -248,13 +250,14 @@ class GlucoseGraphView(NSView):
             "No graph data yet", attrs
         )
         size = text.size()
-        m = _PLOT_EDGE_INSET
-        inner_w = bounds.size.width - 2.0 * m
-        inner_h = bounds.size.height - 2.0 * m
+        mx = _PLOT_EDGE_INSET_X
+        my = _PLOT_EDGE_INSET_Y
+        inner_w = bounds.size.width - 2.0 * mx
+        inner_h = bounds.size.height - 2.0 * my
         text.drawAtPoint_(
             NSMakePoint(
-                m + max(0.0, (inner_w - size.width) / 2.0),
-                m + max(0.0, (inner_h - size.height) / 2.0),
+                mx + max(0.0, (inner_w - size.width) / 2.0),
+                my + max(0.0, (inner_h - size.height) / 2.0),
             )
         )
 
