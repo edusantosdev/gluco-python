@@ -267,7 +267,6 @@ _SIGN_IN_MENU_PRIMARY_TITLE = "Sign In to LibreView Account"
 
 # Plain title used when the credentials dialog is opened without custom copy.
 _LIBREVIEW_ACCOUNT_TITLE = "LibreView Account"
-_SIGN_IN_DIALOG_TITLE = "Welcome to Glucobar"
 _SIGN_IN_DIALOG_BODY = (
     "Sign in with your LibreView account so Glucobar can read your glucose "
     "readings. Your email and password are stored securely in your Mac "
@@ -1395,8 +1394,7 @@ class GlucoseApp(rumps.App):
         """Run the onboarding credentials flow on a worker thread.
 
         Same code path as :meth:`_edit_credentials_impl` — the only
-        differences are the dialog's title/body/button copy (welcome
-        framing) and the success alert (a friendly "you're signed
+        differences are the dialog's body/button copy and the success alert (a friendly "you're signed
         in" message rather than the generic edit confirmation).
         """
         default_email = ""
@@ -1409,7 +1407,6 @@ class GlucoseApp(rumps.App):
                 return _native_credentials_dialog(
                     current_email=default_email,
                     current_password=default_password,
-                    title=_SIGN_IN_DIALOG_TITLE,
                     body_text=_SIGN_IN_DIALOG_BODY,
                     save_button=_SIGN_IN_DIALOG_BUTTON,
                 )
@@ -1536,7 +1533,6 @@ class GlucoseApp(rumps.App):
                 return _native_credentials_dialog(
                     current_email=pref_email,
                     current_password=pref_password,
-                    title=_SIGN_IN_DIALOG_TITLE,
                     body_text=_SIGN_IN_DIALOG_BODY,
                     save_button=_SIGN_IN_DIALOG_BUTTON,
                 )
