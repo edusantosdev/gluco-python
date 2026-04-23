@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Package a portable release artifact from dist/Glucobar.app.
+# Package a portable release artifact from dist/GlucoBar.app.
 #
 # Usage:
 #   scripts/package_release_artifact.sh [--version vX.Y.Z] [--repo owner/name]
 #
 # Output:
-#   release/Glucobar-vX.Y.Z-macos.zip
-#   release/Glucobar-vX.Y.Z-macos.zip.sha256
+#   release/GlucoBar-vX.Y.Z-macos.zip
+#   release/GlucoBar-vX.Y.Z-macos.zip.sha256
 #   release/homebrew-cask-snippet.rb
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DIST_APP="${REPO_ROOT}/dist/Glucobar.app"
+DIST_APP="${REPO_ROOT}/dist/GlucoBar.app"
 RELEASE_DIR="${REPO_ROOT}/release"
 PYTHON="${REPO_ROOT}/.venv/bin/python"
 
@@ -59,7 +59,7 @@ fi
 
 mkdir -p "${RELEASE_DIR}"
 
-ZIP_NAME="Glucobar-${VERSION}-macos.zip"
+ZIP_NAME="GlucoBar-${VERSION}-macos.zip"
 ZIP_PATH="${RELEASE_DIR}/${ZIP_NAME}"
 SHA_PATH="${ZIP_PATH}.sha256"
 
@@ -67,7 +67,7 @@ rm -f "${ZIP_PATH}" "${SHA_PATH}"
 
 (
     cd "${REPO_ROOT}/dist"
-    ditto -c -k --sequesterRsrc --keepParent "Glucobar.app" "${ZIP_PATH}"
+    ditto -c -k --sequesterRsrc --keepParent "GlucoBar.app" "${ZIP_PATH}"
 )
 
 SHA256="$(shasum -a 256 "${ZIP_PATH}" | awk '{print $1}')"
@@ -81,16 +81,16 @@ fi
 
 CASK_SNIPPET="${RELEASE_DIR}/homebrew-cask-snippet.rb"
 cat > "${CASK_SNIPPET}" <<EOF
-cask "glucobar" do
+cask "gluco-bar" do
   version "${VERSION#v}"
   sha256 "${SHA256}"
 
   url "${URL_HINT}"
-  name "Glucobar"
+  name "GlucoBar"
   desc "macOS menubar glucose display backed by LibreView"
   homepage "https://github.com/${GITHUB_REPO:-<owner>/<repo>}"
 
-  app "Glucobar.app"
+  app "GlucoBar.app"
 
   zap trash: [
     "~/.glucobar",

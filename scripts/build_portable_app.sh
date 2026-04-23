@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Build a standalone Glucobar.app with py2app.
+# Build a standalone GlucoBar.app with py2app.
 #
 # Usage:
 #   scripts/build_portable_app.sh
 #
 # Output:
-#   dist/Glucobar.app
+#   dist/GlucoBar.app
 
 set -euo pipefail
 
@@ -60,8 +60,8 @@ OPTIONS = {
         "pylibrelinkup",
     ],
     "plist": {
-        "CFBundleName": "Glucobar",
-        "CFBundleDisplayName": "Glucobar",
+        "CFBundleName": "GlucoBar",
+        "CFBundleDisplayName": "GlucoBar",
         "CFBundleIdentifier": "com.glucobar.frontend",
         "CFBundleVersion": "0.3.0",
         "CFBundleShortVersionString": "0.3.0",
@@ -85,7 +85,7 @@ EOF
 
 echo
 echo "Build complete:"
-echo "  ${REPO_ROOT}/dist/Glucobar.app"
+echo "  ${REPO_ROOT}/dist/GlucoBar.app"
 echo
 echo "Quick smoke run:"
-echo "  open \"${REPO_ROOT}/dist/Glucobar.app\""
+echo "  open \"${REPO_ROOT}/dist/GlucoBar.app\""

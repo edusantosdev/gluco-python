@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Glucobar menubar frontend LaunchAgent.
+  GlucoBar menubar frontend LaunchAgent.
 
   Separate agent from the daemon so a frontend crash doesn't kill
   polling (you keep collecting data to catch up on when the menubar
@@ -12,7 +12,7 @@
 
   ``ProgramArguments[0]`` (substituted at install time as
   ``__APP_EXECUTABLE__``) points at the symlinked Python *inside* the
-  ``Glucobar.app`` bundle (``Contents/MacOS/Glucobar``), not at
+  ``GlucoBar.app`` bundle (``Contents/MacOS/GlucoBar``), not at
   ``.venv/bin/python`` directly. Routing through the bundled symlink
   is what makes AppKit resolve ``NSBundle.mainBundle`` to our bundle
   and pick up its ``CFBundleIdentifier`` / ``LSUIElement``. Without

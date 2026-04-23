@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install / uninstall the Glucobar LaunchAgent.
+# Install / uninstall the GlucoBar LaunchAgent.
 #
 # Usage:
 #   scripts/install_launchagent.sh install     # render template + bootstrap
@@ -7,7 +7,7 @@
 #   scripts/install_launchagent.sh status      # is launchd running it?
 #   scripts/install_launchagent.sh logs        # tail stdout/stderr
 #
-# Glucobar is strictly single-wrapper / single-LaunchAgent: the
+# GlucoBar is strictly single-wrapper / single-LaunchAgent: the
 # frontend is the only thing ``launchctl bootstrap``ed, and the daemon
 # always runs as a child process of the frontend under
 # ``macos_frontend.daemon_supervisor``. There is intentionally no
@@ -50,12 +50,12 @@ FRONTEND_TMPL="${REPO_ROOT}/scripts/launchagents/${FRONTEND_LABEL}.plist.tmpl"
 # CFBundleIdentifier / LSUIElement. See scripts/app_bundle/Info.plist.tmpl
 # for the full explanation.
 APP_BUNDLE_SRC="${REPO_ROOT}/scripts/app_bundle"
-APP_BUNDLE_DST="${REPO_ROOT}/build/Glucobar.app"
+APP_BUNDLE_DST="${REPO_ROOT}/build/GlucoBar.app"
 LEGACY_APP_BUNDLE_DST="${REPO_ROOT}/build/Glucose Menubar.app"
 # ``APP_EXECUTABLE`` is a real Python binary inside the bundle.
 # launchd execs it with ``-m macos_frontend``; keeping argv[0] inside the
 # .app is what gives AppKit our ``CFBundleIdentifier``.
-APP_EXECUTABLE="${APP_BUNDLE_DST}/Contents/MacOS/Glucobar"
+APP_EXECUTABLE="${APP_BUNDLE_DST}/Contents/MacOS/GlucoBar"
 
 GUI_DOMAIN="gui/$(id -u)"
 
@@ -117,13 +117,13 @@ build_app_bundle() {
     #
     # Layout produced here:
     #
-    #   Glucobar.app/
+    #   GlucoBar.app/
     #     Contents/
     #       Info.plist
     #       pyvenv.cfg                       (copy of .venv/pyvenv.cfg)
     #       lib/python3.x/site-packages/     (symlink → .venv/...)
     #       MacOS/
-    #         Glucobar                       (copied Python launcher)
+    #         GlucoBar                       (copied Python launcher)
     local contents="${APP_BUNDLE_DST}/Contents"
     local macos="${contents}/MacOS"
     mkdir -p "${macos}" "${contents}/Resources"
@@ -134,13 +134,13 @@ build_app_bundle() {
         "${APP_BUNDLE_SRC}/Info.plist.tmpl" > "${contents}/Info.plist"
     plutil -lint "${contents}/Info.plist" >/dev/null
 
-    # ``CFBundleExecutable`` in Info.plist is ``Glucobar``; keep a real
+    # ``CFBundleExecutable`` in Info.plist is ``GlucoBar``; keep a real
     # executable file in ``Contents/MacOS`` so process path remains inside
     # the bundle (symlinks can resolve to .venv/bin/python and lose bundle
     # identity under launchd).
-    rm -f "${macos}/Glucobar"
-    cp -f "${VENV_PYTHON}" "${macos}/Glucobar"
-    chmod 0755 "${macos}/Glucobar"
+    rm -f "${macos}/GlucoBar"
+    cp -f "${VENV_PYTHON}" "${macos}/GlucoBar"
+    chmod 0755 "${macos}/GlucoBar"
 
     # Copy pyvenv.cfg so Python's venv site-packages discovery finds
     # it when launched from ``Contents/MacOS/``. We copy instead of

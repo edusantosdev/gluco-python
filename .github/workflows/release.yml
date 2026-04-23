@@ -76,6 +76,6 @@ jobs:
         with:
           tag_name: ${{ steps.vars.outputs.tag }}
           files: |
-            release/Glucobar-${{ steps.vars.outputs.tag }}-macos.zip
-            release/Glucobar-${{ steps.vars.outputs.tag }}-macos.zip.sha256
+            release/GlucoBar-${{ steps.vars.outputs.tag }}-macos.zip
+            release/GlucoBar-${{ steps.vars.outputs.tag }}-macos.zip.sha256
             release/homebrew-cask-snippet.rb

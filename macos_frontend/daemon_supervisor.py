@@ -2,7 +2,7 @@
 
 Why this module exists
 ----------------------
-Glucobar ships as a single ``.app``. The menubar is the user-facing
+GlucoBar ships as a single ``.app``. The menubar is the user-facing
 entry point; the daemon is a background poll loop. Shipping them as
 one launchd job (the frontend) with the daemon as a supervised child
 means:
@@ -380,7 +380,7 @@ class DaemonSupervisor:
     def _start_watchdog(self) -> None:
         t = threading.Thread(
             target=self._watchdog_loop,
-            name="glucobar-daemon-watchdog",
+            name="GlucoBar-daemon-watchdog",
             daemon=True,
         )
         self._watchdog = t
@@ -615,7 +615,7 @@ def get_active() -> DaemonSupervisor | None:
 def request_restart(base_url: str | None = None) -> None:
     """Ask the supervised daemon to restart.
 
-    In Glucobar's strict single-wrapper topology the daemon only
+    In GlucoBar's strict single-wrapper topology the daemon only
     ever runs as a managed child of the frontend supervisor, so the
     only supported restart path is:
 

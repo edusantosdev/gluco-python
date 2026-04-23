@@ -1,11 +1,11 @@
 # Engineering Overview
 
-Short technical map of the current Glucobar architecture, plus a brief
+Short technical map of the current GlucoBar architecture, plus a brief
 note on where the project may go next.
 
 ## Runtime Topology
 
-Glucobar is two processes communicating over local HTTP on
+GlucoBar is two processes communicating over local HTTP on
 `127.0.0.1:8765`:
 
 - Frontend (`macos_frontend/app.py`) — AppKit/`rumps` menubar UI.
@@ -64,7 +64,7 @@ Credentials UX is driven by native AppKit `NSPanel` modals
 save, the frontend writes the Keychain entries and asks the
 supervisor to restart the daemon so it re-authenticates immediately.
 
-The frontend must launch from inside `Glucobar.app` (either the
+The frontend must launch from inside `GlucoBar.app` (either the
 source wrapper built by `scripts/install_launchagent.sh` or the
 standalone `py2app` bundle). Running `python -m macos_frontend`
 directly is intentionally rejected — AppKit modals need a real
@@ -137,7 +137,7 @@ the app.
 - The frontend is thin and API-driven.
 - Keychain-only credentials; missing creds is a config state, not a
   retry loop.
-- Reliability > feature breadth. Glucobar is a personal utility, not
+- Reliability > feature breadth. GlucoBar is a personal utility, not
   a medical workflow.
 
 ## Future Direction

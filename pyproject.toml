@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "glucobar"
+name = "gluco-bar"
 version = "0.3.0"
-description = "Glucobar — macOS menubar glucose display backed by LibreView."
+description = "GlucoBar — macOS menubar glucose display backed by LibreView."
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.11"

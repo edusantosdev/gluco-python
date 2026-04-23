@@ -1,6 +1,6 @@
-# Glucobar
+# GlucoBar
 
-Glucobar is a macOS menubar app that shows your current LibreView glucose value and trend.
+GlucoBar is a macOS menubar app that shows your current LibreView glucose value and trend.
 
 - `daemon/` polls LibreView and serves local HTTP on `127.0.0.1:8765`.
 - `macos_frontend/` is a menubar UI (`rumps` + AppKit) that reads from the daemon.
@@ -11,7 +11,7 @@ For releases, see `RELEASING.md`.
 
 ## Disclaimer
 
-Glucobar is not a medical device and is not for diagnosis/treatment decisions.
+GlucoBar is not a medical device and is not for diagnosis/treatment decisions.
 It is an independent open-source project and is not affiliated with Abbott.
 
 ## Requirements
@@ -114,7 +114,7 @@ Fixed runtime defaults:
 python3 -m venv .venv
 .venv/bin/python -m pip install -e .[dev,build]
 scripts/build_portable_app.sh
-open dist/Glucobar.app
+open dist/GlucoBar.app
 ```
 
 Create release zip + SHA:

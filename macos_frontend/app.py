@@ -123,7 +123,7 @@ log = logging.getLogger("glucose.frontend")
 
 # Dialog strategy: native ``NSPanel`` modals only.
 #
-# When launched from launchd via the ``Glucobar.app`` wrapper bundle
+# When launched from launchd via the ``GlucoBar.app`` wrapper bundle
 # (see ``scripts/app_bundle/``), AppKit sees a real
 # ``CFBundleIdentifier`` and ``LSUIElement`` and modal dialogs work
 # correctly — so we show a titled ``NSPanel`` with two fields for
@@ -131,7 +131,7 @@ log = logging.getLogger("glucose.frontend")
 # single-OK ``NSPanel`` for informational alerts. We deliberately avoid
 # ``NSAlert`` here: it always reserves space for the app icon and
 # paints the generic Python launcher glyph until we ship a real
-# ``Glucobar.icns``.
+# ``GlucoBar.icns``.
 #
 # Dialog flow runs on a background thread so the
 # rumps menu callback returns immediately (otherwise the menu stays
@@ -158,10 +158,10 @@ def _run_in_background(fn) -> None:
 
 # --- bundled-mode detection ------------------------------------------------
 #
-# Any launch outside ``Glucobar.app`` is unsupported and rejected at
+# Any launch outside ``GlucoBar.app`` is unsupported and rejected at
 # startup. We accept two "bundled enough" signals:
 #   1) main bundle id matches ``com.glucobar.frontend`` (py2app build)
-#   2) ``sys.executable`` path is inside ``Glucobar.app/Contents/MacOS``
+#   2) ``sys.executable`` path is inside ``GlucoBar.app/Contents/MacOS``
 #      (source-wrapper bundle used by install_launchagent.sh).
 
 _BUNDLE_ID = "com.glucobar.frontend"
@@ -176,15 +176,15 @@ def _is_bundled() -> bool:
         return True
     exe = Path(sys.executable)
     return (
-        exe.name == "Glucobar"
-        and "Glucobar.app" in exe.parts
+        exe.name == "GlucoBar"
+        and "GlucoBar.app" in exe.parts
         and "Contents" in exe.parts
         and "MacOS" in exe.parts
     )
 
 
 def _ensure_bundled_launch() -> None:
-    """Fail fast when launched outside ``Glucobar.app``.
+    """Fail fast when launched outside ``GlucoBar.app``.
 
     Native AppKit modal flows require being launched from the app wrapper
     (or a fully packaged bundle); running this module directly is
@@ -193,7 +193,7 @@ def _ensure_bundled_launch() -> None:
     if _is_bundled():
         return
     raise RuntimeError(
-        "Unsupported launch mode. Start Glucobar from Glucobar.app "
+        "Unsupported launch mode. Start GlucoBar from GlucoBar.app "
         "(e.g. run scripts/install_launchagent.sh install)."
     )
 
@@ -268,13 +268,13 @@ _SIGN_IN_MENU_PRIMARY_TITLE = "Sign In to LibreView Account"
 # Plain title used when the credentials dialog is opened without custom copy.
 _LIBREVIEW_ACCOUNT_TITLE = "LibreView Account"
 _SIGN_IN_DIALOG_BODY = (
-    "Sign in with your LibreView account so Glucobar can read your glucose "
+    "Sign in with your LibreView account so GlucoBar can read your glucose "
     "readings. Your email and password are stored securely in your Mac "
     "Keychain and never sent anywhere else."
 )
 _SIGN_IN_DIALOG_BUTTON = "Sign In"
 
-# launchd label + plist path for the one and only LaunchAgent Glucobar
+# launchd label + plist path for the one and only LaunchAgent GlucoBar
 # installs: the frontend, which in turn supervises the daemon as a
 # child process via :mod:`macos_frontend.daemon_supervisor`. Used by
 # the "Open at Login" menu item's launchctl enable/disable
@@ -1330,7 +1330,7 @@ class GlucoseApp(rumps.App):
                 title="Action needed in Libre app",
                 message=(
                     "LibreView requires Terms/Privacy re-acceptance before "
-                    "Glucobar can connect. Open the official Libre app on your "
+                    "GlucoBar can connect. Open the official Libre app on your "
                     "phone, accept the prompts, then try again."
                 ),
             )
@@ -1360,7 +1360,7 @@ class GlucoseApp(rumps.App):
             self._show_alert(
                 title="Couldn't sign out",
                 message=(
-                    "Glucobar couldn't remove your LibreView credentials from "
+                    "GlucoBar couldn't remove your LibreView credentials from "
                     "the macOS Keychain. Please unlock Keychain Access and try again."
                 ),
             )
@@ -1394,8 +1394,9 @@ class GlucoseApp(rumps.App):
         """Run the onboarding credentials flow on a worker thread.
 
         Same code path as :meth:`_edit_credentials_impl` — the only
-        differences are the dialog's body/button copy and the success alert (a friendly "you're signed
-        in" message rather than the generic edit confirmation).
+        differences are the dialog's body/button copy and the success alert
+        (a friendly "you're signed in" message rather than the generic edit
+        confirmation).
         """
         default_email = ""
         default_password = ""
@@ -1424,7 +1425,7 @@ class GlucoseApp(rumps.App):
                 self._show_alert(
                     title="Sign-in incomplete",
                     message=(
-                        "Glucobar needs both your email and your LibreView "
+                        "GlucoBar needs both your email and your LibreView "
                         "password. Please check both fields and try again."
                     ),
                 )
@@ -1436,7 +1437,7 @@ class GlucoseApp(rumps.App):
                 self._show_alert(
                     title="Couldn't save sign-in",
                     message=(
-                        f"{e}\n\nGlucobar couldn't write to your Mac Keychain. "
+                        f"{e}\n\nGlucoBar couldn't write to your Mac Keychain. "
                         "Please try again."
                     ),
                 )
@@ -1457,7 +1458,7 @@ class GlucoseApp(rumps.App):
             self._show_alert(
                 title="You're signed in",
                 message=(
-                    "Glucobar is connecting to LibreView with your account now. "
+                    "GlucoBar is connecting to LibreView with your account now. "
                     "Your first glucose reading should appear in the menubar "
                     "shortly."
                 ),
@@ -1566,7 +1567,7 @@ class GlucoseApp(rumps.App):
                     title="Couldn't save sign-in",
                     message=(
                         f"{e}\n\n"
-                        "Glucobar only reads LibreView credentials from the macOS "
+                        "GlucoBar only reads LibreView credentials from the macOS "
                         "Keychain, so they need to land there before the daemon "
                         "can sign in."
                     ),
@@ -1588,7 +1589,7 @@ class GlucoseApp(rumps.App):
                 title="Sign-in saved",
                 message=(
                     "Saved to your Mac Keychain. "
-                    "Glucobar is reconnecting with these details now."
+                    "GlucoBar is reconnecting with these details now."
                 ),
             )
             return
@@ -1599,7 +1600,7 @@ class GlucoseApp(rumps.App):
         Uses :func:`_native_info_alert` (an ``NSPanel``)
         instead of ``NSAlert`` so we don't paint the generic Python
         launcher icon next to every message until we ship a real
-        ``Glucobar.icns``.
+        ``GlucoBar.icns``.
         """
         _run_on_main_and_wait(
             lambda: _native_info_alert(title=title, message=message)

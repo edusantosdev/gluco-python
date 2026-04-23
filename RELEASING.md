@@ -1,4 +1,4 @@
-# Releasing Glucobar
+# Releasing GlucoBar
 
 Short release checklist for macOS artifacts and Homebrew cask updates.
 Release automation lives in `.github/workflows/release.yml`.
@@ -13,7 +13,7 @@ python3 -m venv .venv
 scripts/build_portable_app.sh
 ```
 
-Output: `dist/Glucobar.app`.
+Output: `dist/GlucoBar.app`.
 
 ## 2. Package a release artifact
 
@@ -23,8 +23,8 @@ scripts/package_release_artifact.sh --version vX.Y.Z --repo <owner>/<repo>
 
 Outputs under `release/`:
 
-- `Glucobar-vX.Y.Z-macos.zip`
-- `Glucobar-vX.Y.Z-macos.zip.sha256`
+- `GlucoBar-vX.Y.Z-macos.zip`
+- `GlucoBar-vX.Y.Z-macos.zip.sha256`
 - `homebrew-cask-snippet.rb`
 
 Without `--version`, the script reads the version from `pyproject.toml`.
@@ -46,12 +46,12 @@ You can also trigger the workflow manually via
 
 ## 4. Update the Homebrew tap cask
 
-In your tap, edit `Casks/glucobar.rb`:
+In your tap, edit `Casks/gluco-bar.rb`:
 
 - `version "X.Y.Z"`
 - `sha256` from the release `.sha256` file
 - URL must resolve to:
-  `https://github.com/<owner>/<repo>/releases/download/vX.Y.Z/Glucobar-vX.Y.Z-macos.zip`
+  `https://github.com/<owner>/<repo>/releases/download/vX.Y.Z/GlucoBar-vX.Y.Z-macos.zip`
 
 Commit and push in the tap repo.
 
@@ -60,14 +60,14 @@ Commit and push in the tap repo.
 ```bash
 brew update
 brew tap <your-org>/<your-tap>
-brew install --cask glucobar
-open -a Glucobar
+brew install --cask gluco-bar
+open -a GlucoBar
 ```
 
-Optionally `brew upgrade --cask glucobar` from the previous version.
+Optionally `brew upgrade --cask gluco-bar` from the previous version.
 
 ## Notes
 
 - Artifacts are currently unsigned and not notarized.
 - For a manual fallback (no tag workflow), use
-  `gh release create vX.Y.Z release/Glucobar-vX.Y.Z-macos.zip`.
+  `gh release create vX.Y.Z release/GlucoBar-vX.Y.Z-macos.zip`.
