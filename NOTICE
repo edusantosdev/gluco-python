@@ -1,0 +1,26 @@
+Glucobar
+Copyright 2026 The Glucobar contributors
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product is not a medical device and is not intended for clinical
+decision-making. Glucose data retrieved through this tool originates
+from your own LibreLinkUp account; the authors are not affiliated with,
+endorsed by, or otherwise associated with Abbott Laboratories.
+"FreeStyle Libre", "LibreLink", and "LibreLinkUp" are trademarks of
+Abbott Laboratories.
+
+This product bundles or depends on third-party open source software.
+Their respective licenses apply; see each project's source for details.
+Notable runtime dependencies:
+
+  - pylibrelinkup       (MIT)
+  - rumps               (BSD-3-Clause)
+  - pyobjc-framework-*  (MIT)
+  - fastapi             (MIT)
+  - uvicorn             (BSD-3-Clause)
+  - httpx               (BSD-3-Clause)
+  - pydantic            (MIT)
+  - pydantic-settings   (MIT)
+  - python-dotenv       (BSD-3-Clause)
+  - keyring             (MIT)

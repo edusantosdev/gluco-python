@@ -30,7 +30,12 @@ from glucose_common.credentials import load_credentials  # noqa: E402
 
 
 def _default_state_dir() -> Path:
-    return Path.home() / ".glucose-display"
+    # Renamed from ``~/.glucose-display`` in v0.3.0. The daemon
+    # recreates the directory on first run; any cached session will be
+    # refreshed on the next LibreLinkUp call, so no explicit migration
+    # is needed. Users who want to preserve rotating logs can
+    # ``mv ~/.glucose-display ~/.glucobar`` before the first run.
+    return Path.home() / ".glucobar"
 
 
 class Settings(BaseSettings):

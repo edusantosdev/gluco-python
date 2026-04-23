@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Glucose menubar frontend LaunchAgent.
+  Glucobar menubar frontend LaunchAgent.
 
   Separate agent from the daemon so a frontend crash doesn't kill
   polling (you keep collecting data to catch up on when the menubar
@@ -12,17 +12,17 @@
 
   ``ProgramArguments[0]`` (substituted at install time as
   ``__APP_EXECUTABLE__``) points at the symlinked Python *inside* the
-  ``Glucose Menubar.app`` bundle (``Contents/MacOS/Glucose Menubar``),
-  not at ``.venv/bin/python`` directly. Routing through the bundled
-  symlink is what makes AppKit resolve ``NSBundle.mainBundle`` to our
-  bundle and pick up its ``CFBundleIdentifier`` / ``LSUIElement``.
-  Without that, modal dialogs and NSUserNotification delivery silently
-  fail and launchd ends up in a crash/relaunch loop.
+  ``Glucobar.app`` bundle (``Contents/MacOS/Glucobar``), not at
+  ``.venv/bin/python`` directly. Routing through the bundled symlink
+  is what makes AppKit resolve ``NSBundle.mainBundle`` to our bundle
+  and pick up its ``CFBundleIdentifier`` / ``LSUIElement``. Without
+  that, modal dialogs and NSUserNotification delivery silently fail
+  and launchd ends up in a crash/relaunch loop.
 -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.glucose-display.frontend</string>
+    <string>com.glucobar.frontend</string>
 
     <key>ProgramArguments</key>
     <array>

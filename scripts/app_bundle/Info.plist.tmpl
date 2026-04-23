@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Info.plist for the Glucose Menubar frontend .app bundle.
+  Info.plist for the Glucobar frontend .app bundle.
 
   The whole point of this bundle is *not* to freeze Python — it's to
   give AppKit a bundle identity for our otherwise-unbundled Python
@@ -18,8 +18,8 @@
   icon, no app switcher entry, exactly what we want.
 
   The Python interpreter inherits this bundle identity because
-  launchd execs the symlink at ``Contents/MacOS/Glucose Menubar``
-  (which points at the venv's Python) — Launch Services infers the
+  launchd execs the symlink at ``Contents/MacOS/Glucobar`` (which
+  points at the venv's Python) — Launch Services infers the
   containing ``.app`` from that executable path, and Python finds
   ``pyvenv.cfg`` one directory up under ``Contents/`` so the venv's
   ``site-packages`` is still on ``sys.path``.
@@ -27,19 +27,19 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Glucose Menubar</string>
+    <string>Glucobar</string>
 
     <key>CFBundleDisplayName</key>
-    <string>Glucose Menubar</string>
+    <string>Glucobar</string>
 
     <key>CFBundleIdentifier</key>
-    <string>com.glucose-display.frontend</string>
+    <string>com.glucobar.frontend</string>
 
     <key>CFBundleVersion</key>
-    <string>0.1.0</string>
+    <string>0.3.0</string>
 
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>0.3.0</string>
 
     <key>CFBundlePackageType</key>
     <string>APPL</string>
@@ -49,13 +49,13 @@
 
     <!--
       The executable name must match a real file in ``Contents/MacOS/``.
-      The install script creates ``Contents/MacOS/Glucose Menubar`` as a
+      The install script creates ``Contents/MacOS/Glucobar`` as a
       symlink to the venv's Python, so ``CFBundleExecutable`` matches.
       When launchd spawns it with ``-m macos_frontend``, Python finds
       ``pyvenv.cfg`` at ``Contents/`` and picks up the venv.
     -->
     <key>CFBundleExecutable</key>
-    <string>Glucose Menubar</string>
+    <string>Glucobar</string>
 
     <key>LSUIElement</key>
     <true/>
@@ -67,6 +67,6 @@
     <true/>
 
     <key>NSHumanReadableCopyright</key>
-    <string>Personal utility — not a medical device.</string>
+    <string>Copyright 2026 The Glucobar contributors. Not a medical device.</string>
 </dict>
 </plist>

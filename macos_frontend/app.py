@@ -106,8 +106,8 @@ log = logging.getLogger("glucose.frontend")
 
 # Dialog strategy: native NSAlert when bundled, osascript fallback otherwise.
 #
-# When launched from launchd via the ``Glucose Menubar.app`` wrapper
-# bundle (see ``scripts/app_bundle/``), AppKit sees a real
+# When launched from launchd via the ``Glucobar.app`` wrapper bundle
+# (see ``scripts/app_bundle/``), AppKit sees a real
 # ``CFBundleIdentifier`` and ``LSUIElement`` and modal dialogs work
 # correctly — so we show a single ``NSAlert`` with a two-field
 # accessory view for credentials, which is the UX the user asked for.
@@ -226,13 +226,13 @@ def _run_in_background(fn) -> None:
 
 # --- bundled-mode detection ------------------------------------------------
 #
-# When launched via the ``Glucose Menubar.app`` wrapper bundle, AppKit sees
-# a real ``CFBundleIdentifier`` and ``NSAlert.runModal()`` works correctly.
+# When launched via the ``Glucobar.app`` wrapper bundle, AppKit sees a real
+# ``CFBundleIdentifier`` and ``NSAlert.runModal()`` works correctly.
 # When launched directly (``python -m macos_frontend`` during development),
 # the same calls can silently tear down the process — so we fall back to
 # the osascript two-dialog flow.
 
-_BUNDLE_ID = "com.glucose-display.frontend"
+_BUNDLE_ID = "com.glucobar.frontend"
 
 
 def _is_bundled() -> bool:
@@ -1062,8 +1062,8 @@ class GlucoseApp(rumps.App):
     def _edit_credentials_impl(self) -> None:
         """Capture email + password and save to Keychain.
 
-        When running inside the ``Glucose Menubar.app`` wrapper bundle
-        we show a single native NSAlert with two fields. When running
+        When running inside the ``Glucobar.app`` wrapper bundle we show
+        a single native NSAlert with two fields. When running
         unbundled (``python -m macos_frontend`` during development),
         AppKit modals can tear the process down, so we fall back to
         the osascript two-dialog flow which delegates UI to a properly

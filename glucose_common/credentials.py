@@ -14,7 +14,7 @@ Keyring uses a ``(service, username)`` key. We use a single service name
 and two synthetic usernames so both secrets live in the same
 Keychain-visible group:
 
-    service  = "librelinkup-glucose-menubar"
+    service  = "glucobar"
     username = "email"     → the account email (not secret, but kept here
                              so a single Keychain entry covers everything)
     username = "password"  → the LibreLinkUp password
@@ -23,6 +23,12 @@ If the Keychain is unreadable (no GUI session, CI, remote SSH without
 `security unlock-keychain`), we fall back to environment variables so
 development and headless usage both keep working. That matches the
 plan's guidance: Keychain first, ``.env`` fallback, same code path.
+
+.. note::
+   Prior to v0.3.0 the service name was ``librelinkup-glucose-menubar``.
+   Existing Keychain entries under that name are not migrated
+   automatically — run ``scripts/set_credentials.py`` once after
+   upgrading to re-save under ``glucobar``.
 """
 
 from __future__ import annotations
@@ -33,7 +39,7 @@ from typing import Protocol
 
 log = logging.getLogger(__name__)
 
-KEYCHAIN_SERVICE = "librelinkup-glucose-menubar"
+KEYCHAIN_SERVICE = "glucobar"
 _EMAIL_KEY = "email"
 _PASSWORD_KEY = "password"
 

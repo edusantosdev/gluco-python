@@ -25,6 +25,7 @@ htmlcov/
 *.swp
 
 # Local daemon state (lockfile, cached session, rotating log)
+.glucobar/
 .glucose-display/
 /tmp/glucose_daemon.log
 

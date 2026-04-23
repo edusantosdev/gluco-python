@@ -23,7 +23,7 @@ Two separate processes cooperate over local HTTP:
 ```
 ┌───────────────────────────────────┐       ┌─────────────────────────────────┐
 │             daemon                │       │          macos_frontend         │
-│  (`python -m daemon`)             │       │  (`Glucose Menubar.app`)        │
+│  (`python -m daemon`)             │       │  (`Glucobar.app`)               │
 │                                   │       │                                 │
 │  uvicorn + FastAPI                │       │  rumps menubar app              │
 │    │                              │       │    │                            │
@@ -37,8 +37,8 @@ Two separate processes cooperate over local HTTP:
 └───────────────────────────────────┘       └─────────────────────────────────┘
          ▲                                                    ▲
          │                                                    │
-         │ LaunchAgent #1: com.glucose-display.daemon         │ LaunchAgent #2:
-         │                                                    │ com.glucose-display.frontend
+         │ LaunchAgent #1: com.glucobar.daemon                │ LaunchAgent #2:
+         │                                                    │ com.glucobar.frontend
          └───────────── launchd (user session) ───────────────┘
 ```
 
@@ -61,8 +61,8 @@ Two separate processes cooperate over local HTTP:
 `scripts/launchagents/*.tmpl` with fully qualified paths (launchd has
 no useful `$PATH`), then `launchctl bootstrap`s them into
 `gui/$(id -u)`. `KeepAlive` restarts crashes; `RunAtLoad` handles
-login. The frontend plist points at `build/Glucose Menubar.app`, a
-thin wrapper bundle whose `Contents/MacOS/Glucose Menubar` is a
+login. The frontend plist points at `build/Glucobar.app`, a
+thin wrapper bundle whose `Contents/MacOS/Glucobar` is a
 symlink to `.venv/bin/python` — this gives AppKit a real
 `CFBundleIdentifier` and `LSUIElement`, which it needs for native
 alerts and notifications to behave.
@@ -175,7 +175,7 @@ network errors and rate-limits back off on separate schedules.
 
 LibreView JWTs are valid for ~1 hour. `FileSessionStore` serializes
 `{token, account_id_hash, expires_at}` as mode-0600 JSON under
-`~/.glucose-display/session.json`, using a tempfile-then-rename so
+`~/.glucobar/session.json`, using a tempfile-then-rename so
 a crash mid-write can't corrupt. Expiry is parsed passively from
 the JWT `exp` claim (no signature verification — the server still
 enforces real expiry; we just want a scheduling hint). Fallback TTL
@@ -187,7 +187,7 @@ re-authenticates if that call returns `AuthenticationError`.
 
 ### Single-instance lock (`daemon/single_instance.py`)
 
-An exclusive `fcntl.flock` on `~/.glucose-display/daemon.lock`
+An exclusive `fcntl.flock` on `~/.glucobar/daemon.lock`
 prevents two daemons racing the same LibreLinkUp account (which
 reliably trips Abbott's rate limiter). Held at module-scope so the
 fd isn't GC'd; kernel releases it on process exit.
@@ -274,7 +274,7 @@ Draw happens on the main thread; `setPoints_` calls
 Credential prompts split by runtime mode, controlled
 by `_is_bundled()`:
 
-- **Bundled** (launched from `Glucose Menubar.app` under launchd):
+- **Bundled** (launched from `Glucobar.app` under launchd):
   AppKit sees the real `CFBundleIdentifier` / `LSUIElement`, so
   a modal `NSPanel` with stacked fields works (we avoid `NSAlert` here
   because it always reserves space for the app icon). The credentials
@@ -323,7 +323,8 @@ Four small modules the daemon, frontend, and scripts all import:
 
 - `credentials.py` — Keychain-first, env-fallback resolver
   (`load_credentials`), `save_credentials`, `clear_credentials`. One
-  service name (`librelinkup-glucose-menubar`), two usernames
+  service name (`glucobar`; was `librelinkup-glucose-menubar` pre-0.3),
+  two usernames
   (`email`, `password`) so both secrets sit in one Keychain-visible
   group. We refuse to mix sources: partial Keychain state always
   falls through to env (silent combining hides bugs).
@@ -343,10 +344,10 @@ reconciles email/password with Keychain (Keychain wins) and fails
 loudly if neither source has them.
 
 State lives under `DAEMON_STATE_DIR` (default
-`~/.glucose-display/`):
+`~/.glucobar/`):
 
 ```
-~/.glucose-display/
+~/.glucobar/
 ├── daemon.lock      # fcntl flock sentinel
 ├── session.json     # JWT + account_id_hash (mode 0600)
 └── daemon.log       # RotatingFileHandler
@@ -429,7 +430,6 @@ The plan explicitly excludes:
 
 - Multi-user / multi-patient support (first patient in the list
   wins).
-- Codesigning or notarization of `Glucose Menubar.app`.
 - A Linux port in-tree (the frontend is AppKit-only; the daemon is
   already portable but there's no Linux UI here yet — see
   `kde-fedora-implementation-plan.md` for the design sketch).

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install / uninstall the LaunchAgents for glucose-display.
+# Install / uninstall the LaunchAgents for Glucobar.
 #
 # Usage:
 #   scripts/install_launchagent.sh install     # render templates + bootstrap
@@ -16,14 +16,22 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENV_PYTHON="${REPO_ROOT}/.venv/bin/python"
-STATE_DIR="${DAEMON_STATE_DIR:-$HOME/.glucose-display}"
+STATE_DIR="${DAEMON_STATE_DIR:-$HOME/.glucobar}"
 
-DAEMON_LABEL="com.glucose-display.daemon"
-FRONTEND_LABEL="com.glucose-display.frontend"
+DAEMON_LABEL="com.glucobar.daemon"
+FRONTEND_LABEL="com.glucobar.frontend"
+
+# Pre-rename labels from the "glucose-display" era. Install/uninstall
+# bootout these too so users upgrading from <=0.2.0 don't end up with
+# two daemons racing the same LibreLinkUp session.
+LEGACY_DAEMON_LABEL="com.glucose-display.daemon"
+LEGACY_FRONTEND_LABEL="com.glucose-display.frontend"
 
 LA_DIR="${HOME}/Library/LaunchAgents"
 DAEMON_PLIST="${LA_DIR}/${DAEMON_LABEL}.plist"
 FRONTEND_PLIST="${LA_DIR}/${FRONTEND_LABEL}.plist"
+LEGACY_DAEMON_PLIST="${LA_DIR}/${LEGACY_DAEMON_LABEL}.plist"
+LEGACY_FRONTEND_PLIST="${LA_DIR}/${LEGACY_FRONTEND_LABEL}.plist"
 
 DAEMON_TMPL="${REPO_ROOT}/scripts/launchagents/${DAEMON_LABEL}.plist.tmpl"
 FRONTEND_TMPL="${REPO_ROOT}/scripts/launchagents/${FRONTEND_LABEL}.plist.tmpl"
@@ -32,12 +40,13 @@ FRONTEND_TMPL="${REPO_ROOT}/scripts/launchagents/${FRONTEND_LABEL}.plist.tmpl"
 # CFBundleIdentifier / LSUIElement. See scripts/app_bundle/Info.plist.tmpl
 # for the full explanation.
 APP_BUNDLE_SRC="${REPO_ROOT}/scripts/app_bundle"
-APP_BUNDLE_DST="${REPO_ROOT}/build/Glucose Menubar.app"
+APP_BUNDLE_DST="${REPO_ROOT}/build/Glucobar.app"
+LEGACY_APP_BUNDLE_DST="${REPO_ROOT}/build/Glucose Menubar.app"
 # ``APP_EXECUTABLE`` is the symlinked venv Python inside the bundle.
 # launchd execs it with ``-m macos_frontend``; Launch Services keys the
 # bundle to that executable path, which is what gives AppKit our
 # ``CFBundleIdentifier``.
-APP_EXECUTABLE="${APP_BUNDLE_DST}/Contents/MacOS/Glucose Menubar"
+APP_EXECUTABLE="${APP_BUNDLE_DST}/Contents/MacOS/Glucobar"
 
 GUI_DOMAIN="gui/$(id -u)"
 
@@ -91,13 +100,13 @@ build_app_bundle() {
     #
     # Layout produced here:
     #
-    #   Glucose Menubar.app/
+    #   Glucobar.app/
     #     Contents/
     #       Info.plist
     #       pyvenv.cfg                       (copy of .venv/pyvenv.cfg)
     #       lib/python3.x/site-packages/     (symlink → .venv/...)
     #       MacOS/
-    #         Glucose Menubar                (symlink → .venv/bin/python)
+    #         Glucobar                       (symlink → .venv/bin/python)
     local contents="${APP_BUNDLE_DST}/Contents"
     local macos="${contents}/MacOS"
     mkdir -p "${macos}" "${contents}/Resources"
@@ -108,10 +117,10 @@ build_app_bundle() {
         "${APP_BUNDLE_SRC}/Info.plist.tmpl" > "${contents}/Info.plist"
     plutil -lint "${contents}/Info.plist" >/dev/null
 
-    # ``CFBundleExecutable`` in Info.plist is ``Glucose Menubar``; this
-    # symlink is what launchd actually execs, and what Python sees as
-    # its own executable path.
-    ln -sfn "${VENV_PYTHON}" "${macos}/Glucose Menubar"
+    # ``CFBundleExecutable`` in Info.plist is ``Glucobar``; this symlink
+    # is what launchd actually execs, and what Python sees as its own
+    # executable path.
+    ln -sfn "${VENV_PYTHON}" "${macos}/Glucobar"
 
     # Copy pyvenv.cfg so Python's venv site-packages discovery finds
     # it when launched from ``Contents/MacOS/``. We copy instead of
@@ -155,6 +164,14 @@ cmd_install() {
     # Plists under ~/Library/LaunchAgents must not be world-writable.
     chmod 0644 "${DAEMON_PLIST}" "${FRONTEND_PLIST}"
 
+    # Upgrading from the pre-rename "glucose-display" labels: bootout
+    # the old pair so two daemons aren't polling LibreLinkUp at once,
+    # and remove the stale plist files from ~/Library/LaunchAgents/.
+    bootout_agent "${LEGACY_DAEMON_LABEL}" "${LEGACY_DAEMON_PLIST}"
+    bootout_agent "${LEGACY_FRONTEND_LABEL}" "${LEGACY_FRONTEND_PLIST}"
+    rm -f "${LEGACY_DAEMON_PLIST}" "${LEGACY_FRONTEND_PLIST}"
+    rm -rf "${LEGACY_APP_BUNDLE_DST}"
+
     # "bootstrap" is the modern replacement for "load". It's a no-op if
     # the label is already loaded, so we unload first to pick up template
     # changes (path moves, env var additions, etc.).
@@ -177,7 +194,11 @@ cmd_install() {
 cmd_uninstall() {
     bootout_agent "${DAEMON_LABEL}" "${DAEMON_PLIST}"
     bootout_agent "${FRONTEND_LABEL}" "${FRONTEND_PLIST}"
-    rm -f "${DAEMON_PLIST}" "${FRONTEND_PLIST}"
+    # Also sweep the pre-rename labels if they're still around.
+    bootout_agent "${LEGACY_DAEMON_LABEL}" "${LEGACY_DAEMON_PLIST}"
+    bootout_agent "${LEGACY_FRONTEND_LABEL}" "${LEGACY_FRONTEND_PLIST}"
+    rm -f "${DAEMON_PLIST}" "${FRONTEND_PLIST}" \
+          "${LEGACY_DAEMON_PLIST}" "${LEGACY_FRONTEND_PLIST}"
     echo "Removed LaunchAgents (plist files and loaded jobs)."
 }
 

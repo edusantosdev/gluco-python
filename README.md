@@ -1,51 +1,38 @@
-# librelinkup-glucose-menubar-python
+# Glucobar
 
-Personal macOS menubar glucose display for LibreLinkUp.
+A macOS menubar glucose display backed by LibreLinkUp.
 
 - `daemon` polls LibreLinkUp and serves local HTTP on `127.0.0.1:8765`.
 - `macos_frontend` is a menubar app (`rumps`) that reads from the daemon.
-- credentials are loaded from macOS Keychain first, then `.env`.
+- Credentials are loaded from macOS Keychain first, then `.env`.
 
 For design details, see [`glucose-menubar-implementation-plan.md`](./glucose-menubar-implementation-plan.md) (the phased design journal) and [`ENGINEERING.md`](./ENGINEERING.md) (how the current code fits together).
 
-## Prerequisites
+## ⚠️ Disclaimer
 
-This app is a **read-only** LibreLinkUp client — it does not talk to the sensor directly. The full data path is:
+**Glucobar is not a medical device.** It is not intended for diagnosis,
+treatment, or any clinical decision-making. Do not rely on it for
+therapy adjustments — check your sensor or meter directly.
 
-`Sensor → FreeStyle LibreLink app (phone) → LibreView cloud → LibreLinkUp → this app`
+Glucobar is an independent open-source project. It is **not affiliated
+with, endorsed by, or sponsored by Abbott Laboratories**. "FreeStyle
+Libre", "LibreLink", and "LibreLinkUp" are trademarks of Abbott.
+Glucobar uses your own LibreLinkUp account credentials to read data
+from Abbott's servers on your behalf; no data is redistributed.
 
-For anything to show up in the menubar, **all** of the following must be true:
+Use at your own risk. See [`LICENSE`](./LICENSE) (Apache-2.0) for the
+full warranty disclaimer.
 
-1. **Compatible Abbott sensor applied and active**: FreeStyle Libre 2, Libre 2 Plus, or Libre 3. Libre 1 is not supported by LibreLinkUp.
-2. **FreeStyle LibreLink app** installed on the wearer's phone, paired with the sensor, running (kept open/in the background), with **Bluetooth enabled** on the phone. If the LibreLink app is force-closed or Bluetooth is off, new readings stop flowing to the cloud and this menubar will show stale/`Connecting…`.
-3. **LibreLinkUp account** created and connected as a follower of the LibreLink user (see below).
-4. **macOS** with Python 3.11+ (the frontend uses AppKit via PyObjC).
+## Requirements
 
-### Create a LibreLinkUp account and connect it
+- macOS 11+ (frontend uses AppKit via PyObjC)
+- Python 3.11+
+- A LibreLinkUp account with at least one shared sensor
 
-LibreLinkUp is Abbott's free "follower" app — separate from FreeStyle LibreLink. You'll end up with **two accounts**: the wearer's LibreLink account, and your LibreLinkUp follower account (they can be the same email if you're following yourself).
+## Quick Start (from source)
 
-1. Install **LibreLinkUp** on any phone ([iOS](https://apps.apple.com/app/librelinkup/id1234323923) / [Android](https://play.google.com/store/apps/details?id=org.nativescript.LibreLinkUp)) and sign up for a new account. Accept the terms of use on first login.
-2. On the wearer's phone, open **FreeStyle LibreLink** → menu → **Connected Apps** → **LibreLinkUp** → **Connect** and enter the LibreLinkUp email to invite as a follower.
-3. Open **LibreLinkUp** and accept the pending invitation. Once accepted and a reading is visible in LibreLinkUp, the same credentials will work in this app.
-
-Use the **LibreLinkUp** email/password (not the LibreLink one) for `LIBRELINKUP_EMAIL` / `LIBRELINKUP_PASSWORD` below.
-
-## Quick Install
-
-Once the prerequisites above are in place:
-
-```bash
-git clone https://github.com/edusantosdev/librelinkup-glucose-menubar-python.git
-cd librelinkup-glucose-menubar-python
-python3 -m venv .venv && .venv/bin/python -m pip install -e .
-cp .env.example .env && $EDITOR .env   # set LIBRELINKUP_EMAIL / PASSWORD / REGION
-.venv/bin/python scripts/phase0_probe.py       # verify credentials/region
-.venv/bin/python scripts/set_credentials.py    # move creds into Keychain (recommended)
-scripts/install_launchagent.sh install         # auto-start daemon + menubar on login
-```
-
-## Quick Start (Recommended)
+Glucobar is currently distributed as source — packaged `.app`
+downloads are on the roadmap (see [Packaging roadmap](#packaging-roadmap)).
 
 ```bash
 # 1) Create venv and install deps
@@ -92,7 +79,7 @@ Run only one side:
 
 ## Daily Commands
 
-`scripts/install_launchagent.sh install` re-applies the LaunchAgent plists, rebuilds `build/Glucose Menubar.app` when needed, and restarts both jobs—use it after code or `.env` changes, or after recreating the venv.
+`scripts/install_launchagent.sh install` re-applies the LaunchAgent plists, rebuilds `build/Glucobar.app` when needed, and restarts both jobs—use it after code or `.env` changes, or after recreating the venv.
 
 `scripts/install_launchagent.sh uninstall` unregisters both LaunchAgents so `launchd` stops auto-starting and restarting them, removes the plist files from `~/Library/LaunchAgents/`, and leaves you to start the daemon and menubar yourself if you still need them or to run `install` again when you want `launchd` to manage them.
 
@@ -105,7 +92,6 @@ curl -s -X POST http://127.0.0.1:8765/auth/refresh | jq
 ```
 
 ## Menubar Status Titles
-
 
 The menubar title is the whole UI — the dropdown only carries the graph
 and action buttons. Statuses collapse to these titles:
@@ -148,7 +134,7 @@ All settings come from environment variables (usually `.env`).
 - `THRESHOLD_LOW_MG_DL` (default `70`)
 - `THRESHOLD_HIGH_MG_DL` (default `180`)
 - `THRESHOLD_VERY_HIGH_MG_DL` (default `250`)
-- `DAEMON_STATE_DIR` (default `~/.glucose-display`)
+- `DAEMON_STATE_DIR` (default `~/.glucobar`)
 - `LOG_LEVEL` (default `INFO`)
 
 See `.env.example` for the full list.
@@ -162,6 +148,37 @@ See `.env.example` for the full list.
   - bundled launch (`install_launchagent.sh install`): native single-window email+password dialog
   - terminal launch (`python -m macos_frontend`): AppleScript fallback prompts
 
+## Privacy
+
+Glucobar talks directly to LibreLinkUp's servers using the credentials
+you provide, and to `127.0.0.1:8765` between the daemon and the
+menubar. There is no telemetry, no analytics, and no third-party
+server in the loop.
+
+State lives under `~/.glucobar/` (configurable via `DAEMON_STATE_DIR`):
+
+- `daemon.lock` — single-instance guard
+- `session.json` — cached LibreLinkUp session token
+- `logs/daemon.log*` — rotating log (1 MB × 5 files)
+
+Credentials live in the macOS Keychain under service name `glucobar`.
+Remove them with `scripts/set_credentials.py --clear` or via
+**Keychain Access.app**.
+
+## Upgrading from v0.2.x (`glucose-display`)
+
+Glucobar used to be called `glucose-display`. If you're upgrading:
+
+1. `scripts/install_launchagent.sh install` will automatically bootout
+   the old `com.glucose-display.daemon` / `com.glucose-display.frontend`
+   LaunchAgents and remove `build/Glucose Menubar.app`.
+2. The Keychain service name changed from `librelinkup-glucose-menubar`
+   to `glucobar`. Re-run `scripts/set_credentials.py` once to save
+   under the new name, then delete the old entry in **Keychain Access.app**.
+3. The daemon state directory moved from `~/.glucose-display` to
+   `~/.glucobar`. The new one is created on first run; you can delete
+   the old directory or `mv` it over if you want to keep logs.
+
 ## Troubleshooting
 
 - **Account/region check fails**: run `.venv/bin/python scripts/phase0_probe.py` and fix `.env` values.
@@ -174,6 +191,33 @@ See `.env.example` for the full list.
 
 ```bash
 .venv/bin/python -m pytest tests/
+.venv/bin/python -m ruff check .
 ```
 
-Non-goals: notarizing/codesigning the `.app`, Linux port.
+## Packaging roadmap
+
+The current `build/Glucobar.app` is a thin shim around the developer's
+`.venv` — it's only portable on the machine that built it. Work in
+progress toward a downloadable build:
+
+- [ ] Single-process entry point (menubar launches the daemon as a child)
+- [ ] `py2app` config producing a standalone `Glucobar.app`
+- [ ] App icon (`resources/Glucobar.icns`)
+- [ ] Onboarding / preferences window for first-launch credential entry
+- [ ] GitHub Actions release workflow (build → ad-hoc sign → zip/dmg → upload)
+- [ ] Homebrew Cask tap
+- [ ] (Stretch) Developer ID signing + notarization
+
+Until those land, install from source using the instructions above.
+
+## Contributing
+
+Issues and pull requests welcome, with the understanding that Glucobar
+is a personal-scope menubar utility — feature scope will stay small.
+Please run `pytest` and `ruff check` before opening a PR. Bug reports
+that include `scripts/phase0_probe.py` output and your LibreLinkUp
+region will be triaged fastest.
+
+## License
+
+Apache-2.0. See [`LICENSE`](./LICENSE) and [`NOTICE`](./NOTICE).

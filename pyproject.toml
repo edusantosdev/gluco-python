@@ -1,8 +1,22 @@
 [project]
-name = "glucose-display"
-version = "0.2.0"
-description = "Personal LibreLinkUp glucose menubar app for macOS (daemon + frontend)."
+name = "glucobar"
+version = "0.3.0"
+description = "Glucobar — macOS menubar glucose display backed by LibreLinkUp."
+readme = "README.md"
+license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
+keywords = ["glucose", "librelinkup", "menubar", "macos", "cgm", "freestyle-libre"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: MacOS X",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: MacOS :: MacOS X",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Utilities",
+]
 # All four runtime components — daemon HTTP server, polling client,
 # menubar frontend, and credentials helper — are needed for daily use,
 # so they all live under the default install set. ``pip install -e .``
