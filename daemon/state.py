@@ -17,7 +17,6 @@ class Status(StrEnum):
     OK = "ok"  # fresh reading, sensor talking
     STALE = "stale"  # last reading older than the staleness window
     WARMING_UP = "warming_up"  # sensor in 60-min warm-up
-    SENSOR_ENDED = "sensor_ended"  # sensor expired
     NO_NETWORK = "no_network"  # connection failures, backing off
     AUTH_FAILED = "auth_failed"  # credentials rejected
     TOS_REQUIRED = "tos_required"  # user must accept in Libre app
@@ -54,4 +53,4 @@ def http_status_summary(s: Status) -> str:
         Status.NO_NETWORK,
     ):
         return "degraded"
-    return "down"  # AUTH_FAILED, TOS_REQUIRED, SENSOR_ENDED
+    return "down"  # AUTH_FAILED, TOS_REQUIRED

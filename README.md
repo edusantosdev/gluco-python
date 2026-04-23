@@ -221,7 +221,6 @@ and action buttons. Statuses collapse to these titles:
 | `starting` / `warming_up` / `rate_limited` / stale w/o value | `Connecting…`  |
 | `no_network` / daemon unreachable                      | `⚠ Offline`    |
 | `auth_failed` / `tos_required`                         | `⚠ Sign In`    |
-| `sensor_ended`                                          | `⚠ Error`      |
 | daemon 5xx / other unexpected failure                  | `⚠ Error`      |
 
 When the trend is directional (`↓ ↘ ↗ ↑`) the value + arrow gently pulse

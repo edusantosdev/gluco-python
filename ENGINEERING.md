@@ -191,15 +191,13 @@ encoder:
 - `stale` — last reading older than `STALE_AFTER_SECONDS`.
 - `warming_up` — sensor activated but still inside its 60-minute
   warm-up (`sensor.a + sensor.w*60 > now`).
-- `sensor_ended` — reserved status for future sensor-expiry handling
-  (currently declared in the enum but not emitted by poll logic).
 - `no_network` — transport errors; the daemon is backing off.
 - `auth_failed` — credentials rejected.
 - `tos_required` — Terms / Privacy Policy acceptance required on the
   official Libre app.
 - `rate_limited` — honoring a server `Retry-After`.
 
-`http_status_summary()` maps those nine states to a 3-bucket
+`http_status_summary()` maps those eight states to a 3-bucket
 (`ok | degraded | down`) summary for `/health` consumers that just
 want a traffic light.
 

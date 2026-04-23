@@ -638,10 +638,6 @@ def _native_info_alert(*, title: str, message: str) -> None:
 #   only add noise.
 # * ``⚠ Error`` — unexpected/unhandled failures.
 #
-# ``sensor_ended`` is declared in the daemon's ``Status`` enum but no
-# code path currently sets it; it's mapped here defensively so that, if
-# it's ever wired up, the menubar falls back to the generic error glyph
-# rather than the bare ``⚠``.
 _STATUS_GLYPH = {
     "starting": "Connecting…",
     "stale": "Connecting…",  # only used when stale has no last value
@@ -650,7 +646,6 @@ _STATUS_GLYPH = {
     "no_network": "⚠ Offline",
     "auth_failed": "⚠ Sign In",
     "tos_required": "⚠ Sign In",
-    "sensor_ended": "⚠ Error",
 }
 
 
