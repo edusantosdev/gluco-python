@@ -63,21 +63,22 @@ resumes the stream — no action needed in Glucobar.
 
 ## Quick Start (from source)
 
-Glucobar is currently distributed as source — packaged `.app`
-downloads are on the roadmap (see [Packaging roadmap](#packaging-roadmap)).
+Glucobar is currently distributed as source. A local standalone `.app`
+build is now available via `py2app` (see
+[Build a Standalone App (py2app)](#build-a-standalone-app-py2app)).
+Hosted downloadable releases are still on the roadmap (see
+[Packaging roadmap](#packaging-roadmap)).
 
 ```bash
-# 1) Create venv and install deps
 python3 -m venv .venv
 .venv/bin/python -m pip install -e .
-
-# 2) (Optional) tweak non-credential defaults
 cp .env.example .env
 $EDITOR .env
-
-# 3) Register the Glucobar LaunchAgent (menubar + supervised daemon child, auto-start on login)
 scripts/install_launchagent.sh install
 ```
+
+If you use `zsh` and paste command blocks with `# ...` comment lines, run
+`setopt interactive_comments` first (or paste only the raw commands).
 
 On first launch the menubar prompts for your LibreView email and
 password and saves them to the Keychain. If you prefer the terminal,
@@ -140,6 +141,50 @@ opt-out env var. When a daemon is already listening it stays passive;
 when nothing is listening it spawns and owns the child. That keeps the
 deployment topology strictly "one wrapper, one LaunchAgent, one
 supervisor" regardless of how you launch the menubar.
+
+## Build a Standalone App (py2app)
+
+This builds a portable app bundle at `dist/Glucobar.app` that includes
+its own Python runtime and dependencies (no repo-relative `.venv`
+symlinks).
+
+```bash
+# From repo root
+python3 -m venv .venv
+.venv/bin/python -m pip install -e .[dev,build]
+scripts/build_portable_app.sh
+open dist/Glucobar.app
+```
+
+Notes:
+
+- This is the first packaging step toward release artifacts; the app is
+  not signed or notarized yet.
+- `scripts/install_launchagent.sh` still manages the source-wrapper flow
+  (`build/Glucobar.app`). If you want launch-at-login for a `py2app`
+  build, ship/update a release-specific LaunchAgent plist that points to
+  `dist/Glucobar.app/Contents/MacOS/Glucobar`.
+
+## Package a Release Zip (Homebrew-ready)
+
+After `dist/Glucobar.app` exists, package a release zip + SHA256:
+
+```bash
+# Uses project version from pyproject.toml (e.g. v0.3.0)
+scripts/package_release_artifact.sh --repo your-org/glucobar
+```
+
+Outputs:
+
+- `release/Glucobar-vX.Y.Z-macos.zip`
+- `release/Glucobar-vX.Y.Z-macos.zip.sha256`
+- `release/homebrew-cask-snippet.rb` (ready to paste into a tap cask)
+
+If needed, override the version tag explicitly:
+
+```bash
+scripts/package_release_artifact.sh --version v0.3.0 --repo your-org/glucobar
+```
 
 ## Daily Commands
 
@@ -297,7 +342,7 @@ The current `build/Glucobar.app` is a thin shim around the developer's
 progress toward a downloadable build:
 
 - [x] Single-process entry point (menubar supervises the daemon as a child)
-- [ ] `py2app` config producing a standalone `Glucobar.app`
+- [x] `py2app` config producing a standalone `Glucobar.app`
 - [ ] App icon (`resources/Glucobar.icns`)
 - [x] Onboarding / preferences window for first-launch credential entry
 - [ ] GitHub Actions release workflow (build → ad-hoc sign → zip/dmg → upload)

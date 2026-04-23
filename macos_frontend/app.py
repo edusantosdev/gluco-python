@@ -43,6 +43,7 @@ from AppKit import (
     NSMakeRect,
     NSMutableAttributedString,
     NSPanel,
+    NSEventModifierFlagCommand,
     NSSecureTextField,
     NSTextField,
     NSView,
@@ -412,6 +413,26 @@ class _CredentialsDialogController(NSObject):
         NSApp.stopModalWithCode_(0)
 
 
+class _PasteFriendlySecureTextField(NSSecureTextField):
+    """NSSecureTextField that explicitly handles Cmd+V in modal panels.
+
+    In our custom NSPanel modal, some launches don't route the standard
+    paste key equivalent through the normal responder chain for secure
+    fields. Handling Cmd+V directly keeps password pasting reliable.
+    """
+
+    def performKeyEquivalent_(self, event):  # noqa: N802 - Obj-C selector name.
+        try:
+            is_cmd = bool(int(event.modifierFlags()) & int(NSEventModifierFlagCommand))
+            key = (event.charactersIgnoringModifiers() or "").lower()
+        except Exception:  # noqa: BLE001
+            return objc.super(_PasteFriendlySecureTextField, self).performKeyEquivalent_(event)
+
+        if is_cmd and key == "v":
+            return bool(NSApp.sendAction_to_from_("paste:", None, self))
+        return objc.super(_PasteFriendlySecureTextField, self).performKeyEquivalent_(event)
+
+
 def _native_credentials_dialog(
     *,
     current_email: str = "",
@@ -454,7 +475,7 @@ def _native_credentials_dialog(
     email_field.setStringValue_(current_email)
     email_field.setTranslatesAutoresizingMaskIntoConstraints_(False)
 
-    password_field = NSSecureTextField.alloc().initWithFrame_(
+    password_field = _PasteFriendlySecureTextField.alloc().initWithFrame_(
         NSMakeRect(0, 0, field_width, row_height)
     )
     password_field.setPlaceholderString_("password")
@@ -1271,6 +1292,11 @@ class GlucoseApp(rumps.App):
 
     def _on_edit_credentials(self, _sender) -> None:
         log.info("Update credentials clicked")
+        if load_credentials() is None:
+            # Keep the dropdown behavior identical to first-run startup:
+            # when no credentials exist, show the same onboarding modal.
+            _run_in_background(self._first_run_credentials_impl)
+            return
         _run_in_background(self._edit_credentials_impl)
 
     def _on_first_run_tick(self, _timer) -> None:

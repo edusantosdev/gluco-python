@@ -44,6 +44,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.4"]
+build = ["py2app>=0.28.8"]
 
 # Flat layout with three sibling top-level packages — setuptools' default
 # auto-discovery refuses to build that without an explicit list, so we
