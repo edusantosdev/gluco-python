@@ -146,8 +146,9 @@ Glucobar` is a symlink to `.venv/bin/python`, plus a copy of
 `pyvenv.cfg` and a `site-packages` symlink one level up — enough to
 give AppKit a valid `CFBundleIdentifier` and `LSUIElement=true`
 without an interpreter freeze or a rebundle-on-every-edit loop. The
-same trick makes `NSPanel.runModalForWindow_` actually work; running
-`python -m macos_frontend` straight out of the venv does not.
+same trick makes `NSPanel.runModalForWindow_` actually work; direct
+terminal launches are intentionally unsupported, and the frontend now
+fails fast outside `Glucobar.app`.
 
 A real `py2app` build producing a redistributable `Glucobar.app` is
 on the packaging roadmap in `README.md` but not shipped yet.

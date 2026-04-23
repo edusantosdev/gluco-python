@@ -35,7 +35,7 @@ still communicate exclusively over local HTTP:
 │  │  │                              │     GET /glucose/graph    │     │
 │  │  │                              │     POST /auth/refresh    │     │
 │  │  ├── GlucoseGraphView (NSView)  │                           │     │
-│  │  └── NSPanel / osascript UI     │                           │     │
+│  │  └── NSPanel UI                 │                           │     │
 │  │                                 │                           │     │
 │  │  DaemonSupervisor ─ spawn ─▶ child process ─────────────────┼─┐   │
 │  │     ├── /health probe           │                           │ │   │
@@ -285,7 +285,7 @@ output.
 
 ### Entry points
 
-- `macos_frontend/__main__.py` → `python -m macos_frontend`
+- `build/Glucobar.app` or `dist/Glucobar.app` launches the frontend.
 - `macos_frontend/app.py` — `GlucoseApp(rumps.App)` is the UI class.
 
 ### What it knows
@@ -353,33 +353,21 @@ polyline, a coloured dot on the most recent sample. No interaction.
 Draw happens on the main thread; `setPoints_` calls
 `setNeedsDisplay:`, which AppKit documents as thread-safe.
 
-### Dialogs — two-mode UX
+### Dialogs — bundle-only UX
 
-All frontend dialogs split by runtime mode, controlled
-by `_is_bundled()`:
+Frontend dialogs are native-only and require app-bundle launch.
+`main()` calls `_ensure_bundled_launch()` and rejects direct
+`python` execution.
 
-- **Bundled** (launched from `Glucobar.app` under launchd):
-  AppKit sees the real `CFBundleIdentifier` / `LSUIElement`, so
-  modal `NSPanel`s work. Both the credentials prompt
-  (`_native_credentials_dialog`) and the informational one-button
-  alert (`_native_info_alert`) are `NSPanel`s rather than
-  `NSAlert`s because `NSAlert` always reserves space for the app
-  icon — until we ship a real `Glucobar.icns`, that slot paints
-  the generic Python launcher glyph. The credentials dialog is a
-  single email+password window, reused for both the **LibreView
-  Account** menu item and the first-run onboarding panel — the
-  latter overrides the dialog's `title` / `body_text` /
-  `save_button` parameters for welcome framing.
-- **Unbundled** (`python -m macos_frontend` in a terminal): AppKit
-  silently tears modal-showing Python processes down a few seconds
-  after `runModal()`. The menu credentials path falls back to two
-  sequential `osascript` dialogs — `osascript` itself is a properly
-  bundled helper, so the UI renders in its process, not ours.
-  `_show_alert` falls back to a single `osascript` display-dialog.
-  The first-run onboarding path doesn't bother with either
-  fallback: unbundled runs are developer workflows where
-  credentials are typically already seeded via
-  `scripts/set_credentials.py`.
+Both the credentials prompt (`_native_credentials_dialog`) and the
+informational one-button alert (`_native_info_alert`) are `NSPanel`s
+rather than `NSAlert`s because `NSAlert` always reserves space for the
+app icon — until we ship a real `Glucobar.icns`, that slot paints the
+generic Python launcher glyph. The credentials dialog is a single
+email+password window, reused for both the **LibreView Account** menu
+item and the first-run onboarding panel — the latter overrides the
+dialog's `title` / `body_text` / `save_button` parameters for welcome
+framing.
 
 The dialog flow runs on a background thread (`_run_in_background`)
 so the rumps menu callback returns immediately and the menu doesn't
@@ -410,7 +398,7 @@ numeric title).
 | Item                       | Behaviour                                                                 |
 | -------------------------- | ------------------------------------------------------------------------- |
 | Refresh (freshness hint)   | `DaemonClient.force_refresh()` → `POST /auth/refresh` on the daemon, then `_on_tick(None)` (`_session_refresh_then_tick` in `app.py`) so LibreView is re-authenticated and the title / menu / graph refresh together. |
-| LibreView Account          | Native `NSPanel` modal (bundled) or sequential `osascript` prompts (unbundled) → `save_credentials()` → Keychain → `daemon_supervisor.request_restart()` (SIGTERMs the supervised child, watchdog respawns). Same `_native_credentials_dialog()` is reused by the first-run onboarding modal with welcome-flavoured copy. |
+| LibreView Account          | Native `NSPanel` modal → `save_credentials()` → Keychain → `daemon_supervisor.request_restart()` (SIGTERMs the supervised child, watchdog respawns). Same `_native_credentials_dialog()` is reused by the first-run onboarding modal with welcome-flavoured copy. |
 | Quit                       | Standard rumps quit.                                                      |
 
 ## 5. Shared code (`glucose_common/`)
@@ -544,8 +532,9 @@ That's the whole loop.
   empty Keychain, prompts the user, saves, and calls
   `request_restart()` which clears the sticky flag and lets the
   watchdog spawn a fresh daemon with the new credentials.
-- **Unbundled AppKit modals** → fallback to `osascript` dialogs.
-  This is detected (`_is_bundled()`), not configured.
+- **Frontend launched outside `Glucobar.app`** → startup fails fast via
+  `_ensure_bundled_launch()` with an explicit "unsupported launch mode"
+  error.
 
 ## 10. Non-goals
 
