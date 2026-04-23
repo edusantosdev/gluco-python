@@ -328,6 +328,13 @@ def _run_on_main_and_wait(fn):
 
 # Must match the menubar item label (also used as the credentials window title).
 _LIBREVIEW_ACCOUNT_TITLE = "LibreView Account"
+_SIGN_IN_DIALOG_TITLE = "Welcome to Glucobar"
+_SIGN_IN_DIALOG_BODY = (
+    "Sign in with your LibreView account so Glucobar can read your glucose "
+    "readings. Your email and password are stored securely in your Mac "
+    "Keychain and never sent anywhere else."
+)
+_SIGN_IN_DIALOG_BUTTON = "Sign In"
 
 # launchd label + plist path for the one and only LaunchAgent Glucobar
 # installs: the frontend, which in turn supervises the daemon as a
@@ -455,9 +462,8 @@ def _native_credentials_dialog(
     threads.
 
     ``title`` / ``body_text`` / ``save_button`` default to the
-    everyday "LibreView Account" framing used by the menu; the
-    first-run onboarding path overrides them to welcome the user
-    before they've signed in.
+    basic "LibreView Account" framing. Callers can override these
+    strings when they want onboarding-focused copy.
     """
     field_width = 320
     h_padding = 20
@@ -1353,13 +1359,9 @@ class GlucoseApp(rumps.App):
                 lambda: _native_credentials_dialog(
                     current_email=default_email,
                     current_password=default_password,
-                    title="Welcome to Glucobar",
-                    body_text=(
-                        "Sign in with your LibreView account so Glucobar can read "
-                        "your glucose readings. Your email and password are stored "
-                        "securely in your Mac Keychain and never sent anywhere else."
-                    ),
-                    save_button="Sign In",
+                    title=_SIGN_IN_DIALOG_TITLE,
+                    body_text=_SIGN_IN_DIALOG_BODY,
+                    save_button=_SIGN_IN_DIALOG_BUTTON,
                 )
             )
             if not ok:
@@ -1486,6 +1488,9 @@ class GlucoseApp(rumps.App):
                     lambda: _native_credentials_dialog(
                         current_email=pref_email,
                         current_password=pref_password,
+                        title=_SIGN_IN_DIALOG_TITLE,
+                        body_text=_SIGN_IN_DIALOG_BODY,
+                        save_button=_SIGN_IN_DIALOG_BUTTON,
                     )
                 )
             else:

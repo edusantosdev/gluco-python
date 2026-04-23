@@ -12,6 +12,8 @@ For how the current code fits together, see
 [`ENGINEERING.md`](./ENGINEERING.md). For the design rationale
 (why this shape rather than another), see
 [`glucose-menubar-implementation-plan.md`](./glucose-menubar-implementation-plan.md).
+For release and Homebrew publishing steps, see
+[`RELEASING.md`](./RELEASING.md).
 For the forward-looking Linux port, see
 [`kde-fedora-implementation-plan.md`](./kde-fedora-implementation-plan.md).
 
