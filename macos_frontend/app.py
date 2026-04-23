@@ -49,10 +49,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from glucose_common.credentials import (  # noqa: E402
-    KEYCHAIN_SERVICE,
-    save_credentials,
-)
+from glucose_common.credentials import save_credentials  # noqa: E402
 from macos_frontend.api_client import (  # noqa: E402
     CurrentReading,
     DaemonClient,
@@ -299,9 +296,9 @@ def _native_credentials_dialog(
     threads.
     """
     alert = NSAlert.alloc().init()
-    alert.setMessageText_("Update LibreLinkUp Credentials")
+    alert.setMessageText_("LibreLinkUp sign-in")
     alert.setInformativeText_(
-        "Email and password are stored in the macOS Keychain, not on disk."
+        "Your email and password are stored securely in your Mac Keychain, not as a plain file."
     )
     alert.addButtonWithTitle_("Save")
     alert.addButtonWithTitle_("Cancel")
@@ -364,7 +361,7 @@ _STATUS_GLYPH = {
     "no_network": "⚠ Offline",
     "auth_failed": "⚠ Sign In",
     "tos_required": "⚠ Accept Terms",
-    "rate_limited": "⚠ Rate Limited",
+    "rate_limited": "⚠ Slow Down",
 }
 
 
@@ -443,12 +440,12 @@ def _reading_menu_labels(reading: CurrentReading) -> tuple[str, str]:
         age = _humanize_age(reading.reading_age_seconds)
         unit = reading.unit or ""
         if local_hhmm != "—":
-            updated_line = f"Updated: {age} at {local_hhmm}"
+            updated_line = f"Last updated {age} at {local_hhmm}"
         else:
-            updated_line = f"Updated: {age}"
-        unit_line = f"Units: {unit}" if unit else "Units: —"
+            updated_line = f"Last updated {age}"
+        unit_line = f"Unit: {unit}" if unit else "Unit: —"
         return (updated_line, unit_line)
-    status = _STATUS_TEXT.get(reading.status, "Status: Unavailable")
+    status = _STATUS_TEXT.get(reading.status, "Unavailable")
     detail = _DETAIL_TEXT.get(reading.status, "")
     if detail:
         return (status, detail)
@@ -487,18 +484,18 @@ _STATUS_TEXT = {
     "sensor_ended": "Sensor Ended",
     "no_network": "No Internet Connection",
     "auth_failed": "Sign-In Required",
-    "tos_required": "Open Libre App to Accept Terms",
-    "rate_limited": "Temporarily Rate-Limited",
+    "tos_required": "Open FreeStyle LibreLink to Accept Terms",
+    "rate_limited": "Please Wait a Moment",
 }
 
 _DETAIL_TEXT = {
     "starting": "Getting First Reading",
     "warming_up": "Try Again in a Few Minutes",
-    "sensor_ended": "Replace Sensor in Libre App",
+    "sensor_ended": "Replace Sensor in FreeStyle LibreLink",
     "no_network": "Check Wi-Fi and Try Refresh Now",
-    "auth_failed": "Use Force Re-Authenticate",
-    "tos_required": "Accept Prompts in Official Libre App",
-    "rate_limited": "Will Retry Automatically",
+    "auth_failed": "Choose “Sign In Again” below",
+    "tos_required": "Finish any prompts in FreeStyle LibreLink",
+    "rate_limited": "Retrying automatically",
 }
 
 
@@ -549,9 +546,9 @@ class GlucoseApp(rumps.App):
 
         self._reading_updated_item = rumps.MenuItem("Connecting…")
         self._refresh_item = rumps.MenuItem("Refresh Now", callback=self._on_refresh)
-        self._reauth_item = rumps.MenuItem("Force Re-Authenticate", callback=self._on_reauth)
+        self._reauth_item = rumps.MenuItem("Sign In Again", callback=self._on_reauth)
         self._creds_item = rumps.MenuItem(
-            "Update Credentials…", callback=self._on_edit_credentials
+            "LibreLinkUp Account…", callback=self._on_edit_credentials
         )
 
         # Graph item at the top of the dropdown. ``rumps.MenuItem`` wraps an
@@ -791,14 +788,14 @@ class GlucoseApp(rumps.App):
             reading = self._client.current()
         except DaemonUnreachable as e:
             log.warning("Daemon unreachable: %s", e)
-            self._apply_title_parts("⚠ Daemon Offline", "", "", color=None)
-            self._reading_updated_item.title = "Background Service Offline"
+            self._apply_title_parts("⚠ Not Connected", "", "", color=None)
+            self._reading_updated_item.title = "Can't reach FreeStyle LibreLink"
             self._graph_view.setPoints_([])
             return
         except DaemonError as e:
             log.warning("Daemon error: %s", e)
-            self._apply_title_parts("⚠ Daemon Error", "", "", color=None)
-            self._reading_updated_item.title = "Background Service Error"
+            self._apply_title_parts("⚠ Error", "", "", color=None)
+            self._reading_updated_item.title = "Couldn't load your reading"
             self._graph_view.setPoints_([])
             return
 
@@ -879,14 +876,14 @@ class GlucoseApp(rumps.App):
         email = email.strip()
         if not email:
             self._show_alert(
-                title="Email Required",
-                message="You didn't enter an email. Try Update Credentials… again.",
+                title="Email missing",
+                message="Enter the email for your LibreLinkUp account, then open LibreLinkUp Account… again.",
             )
             return
         if not password:
             self._show_alert(
-                title="Password Required",
-                message="You didn't enter a password. Try Update Credentials… again.",
+                title="Password missing",
+                message="Enter your LibreLinkUp password, then open LibreLinkUp Account… again.",
             )
             return
 
@@ -894,30 +891,34 @@ class GlucoseApp(rumps.App):
             save_credentials(email=email, password=password)
         except Exception as e:  # noqa: BLE001
             self._show_alert(
-                title="Could Not Save Credentials",
-                message=f"{e}\n\nYou can still set LIBRELINKUP_EMAIL/_PASSWORD in .env.",
+                title="Couldn't save sign-in",
+                message=(
+                    f"{e}\n\n"
+                    "If you're comfortable editing config files, you can set "
+                    "LIBRELINKUP_EMAIL and LIBRELINKUP_PASSWORD in `.env` instead."
+                ),
             )
             return
         self._show_alert(
-            title="Credentials Saved",
+            title="Sign-in saved",
             message=(
-                f"Stored under Keychain service '{KEYCHAIN_SERVICE}'. "
-                "Click 'Force Re-Authenticate' to use them now."
+                "Saved to your Mac Keychain. "
+                "Choose “Sign In Again” from the menu to connect with these details now."
             ),
         )
 
     def _osascript_credentials_prompt(self) -> tuple[bool, str, str]:
         """Unbundled-mode fallback: two sequential osascript dialogs."""
         ok, email = _osascript_dialog(
-            title="LibreLinkUp Email",
-            message="Enter the email associated with your LibreLinkUp account.",
+            title="LibreLinkUp email",
+            message="Enter the email you use for LibreLinkUp.",
             ok="Next",
         )
         if not ok:
             return False, "", ""
         ok, password = _osascript_dialog(
-            title="LibreLinkUp Password",
-            message="Password is stored in the macOS Keychain, not on disk.",
+            title="LibreLinkUp password",
+            message="This is saved in your Mac Keychain, not as a plain file.",
             ok="Save",
             hidden_answer=True,
         )

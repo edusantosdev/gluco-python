@@ -205,7 +205,7 @@ class GlucoseGraphView(NSView):
         labels: list[tuple[float, str]] = [(0.0, f"-{self._hours}h")]
         if self._hours >= 2:
             labels.append((0.5, f"-{self._hours // 2}h"))
-        labels.append((1.0, "now"))
+        labels.append((1.0, "Now"))
         baseline_y = plot.origin.y - 12
         for frac, text in labels:
             x = plot.origin.x + frac * plot.size.width

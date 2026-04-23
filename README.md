@@ -86,12 +86,12 @@ curl -s -X POST http://127.0.0.1:8765/auth/refresh | jq
 | `no_network`   | `⚠ Offline`        |
 | `auth_failed`  | `⚠ Sign In`        |
 | `tos_required` | `⚠ Accept Terms`   |
-| `rate_limited` | `⚠ Rate Limited`   |
-| daemon offline | `⚠ Daemon Offline` |
-| daemon error   | `⚠ Daemon Error`   |
+| `rate_limited` | `⚠ Slow Down`      |
+| daemon offline | `⚠ Not Connected`  |
+| daemon error   | `⚠ Error`        |
 
 
-Menu actions: **Refresh Now**, **Force Re-Authenticate**, **Notifications**, **Update Credentials…**, **Set Thresholds…**, **Quit**.
+Menu actions: **Refresh Now**, **Sign In Again**, **LibreLinkUp Account…**, **Quit**.
 
 ## Configuration
 
@@ -127,7 +127,7 @@ See `.env.example` for the full list.
 - Keychain is preferred over `.env` automatically.
 - `scripts/set_credentials.py --show` prints active source.
 - `scripts/set_credentials.py --clear` removes Keychain entries.
-- **Update Credentials…** in menubar:
+- **LibreLinkUp Account…** in the menubar:
   - bundled launch (`install_launchagent.sh install`): native single-window email+password dialog
   - terminal launch (`python -m macos_frontend`): AppleScript fallback prompts
 
