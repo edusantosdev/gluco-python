@@ -34,6 +34,7 @@ from AppKit import (
     NSFont,
     NSFontAttributeName,
     NSForegroundColorAttributeName,
+    NSImage,
     NSMakeRect,
     NSMutableAttributedString,
     NSSecureTextField,
@@ -319,8 +320,11 @@ def _native_credentials_dialog(
     alert = NSAlert.alloc().init()
     alert.setMessageText_("LibreLinkUp sign-in")
     alert.setInformativeText_(
-        "Your email and password are stored securely in your Mac Keychain, not as a plain file."
+        "Your email and password are stored securely in your Mac Keychain."
     )
+    # A blank NSImage suppresses the default app-icon badge that NSAlert
+    # otherwise renders in the top-left corner of the dialog.
+    alert.setIcon_(NSImage.alloc().init())
     alert.addButtonWithTitle_("Save")
     alert.addButtonWithTitle_("Cancel")
 
@@ -493,6 +497,19 @@ def _humanize_age(age_seconds: int | None) -> str:
         return "1 min ago" if minutes == 1 else f"{minutes} min ago"
     hours = minutes // 60
     return "1 hour ago" if hours == 1 else f"{hours} hours ago"
+
+
+def _refresh_secondary_label(age_seconds: int) -> str:
+    """Right-column freshness hint for the Refresh menu row.
+
+    Under a minute we say ``Updated now`` (the API only produces a new
+    sample roughly once a minute, so this covers the full dead zone);
+    past that we hand off to :func:`_humanize_age` for ``X min ago`` /
+    ``X hours ago``.
+    """
+    if age_seconds < 60:
+        return "Updated now"
+    return _humanize_age(age_seconds)
 
 
 def _to_local_hhmm(timestamp_iso: str | None) -> str:
@@ -905,27 +922,49 @@ class GlucoseApp(rumps.App):
         return int(delta.total_seconds())
 
     def _update_refresh_item(self) -> None:
-        """Sync the refresh row's label and enabled state to the live reading age.
+        """Sync the refresh row's label to the live reading age.
 
-        While the sensor reading is under one minute old, the row reads
-        ``Updated now`` and stays disabled — LibreLinkUp samples about
-        once a minute, so an earlier refresh would only hammer the API.
-        Once the reading is a minute old or more, the label becomes
-        ``Refresh (Last updated …)`` and the action is enabled again.
+        The row always reads ``Refresh`` on the left and stays enabled;
+        when we have a reading, a dim parenthesised freshness hint
+        (``Updated now`` under a minute, then ``X min ago`` / ``X hours
+        ago``) is appended in ``secondaryLabelColor`` so it reads as a
+        visual aside rather than competing with the primary action.
         """
         age = self._current_reading_age_seconds()
-        if age is not None and age < 60:
-            self._refresh_item.title = "Updated now"
-            if self._refresh_item.callback is not None:
-                self._refresh_item.set_callback(None)
-            return
-
-        if age is not None and age >= 60:
-            self._refresh_item.title = f"Refresh (Last updated {_humanize_age(age)})"
-        else:
+        menu_item = self._refresh_item._menuitem
+        if age is None:
+            menu_item.setAttributedTitle_(None)
             self._refresh_item.title = "Refresh"
+        else:
+            self._apply_refresh_attr_title(_refresh_secondary_label(age))
         if self._refresh_item.callback is not self._on_refresh:
             self._refresh_item.set_callback(self._on_refresh)
+
+    def _apply_refresh_attr_title(self, secondary: str) -> None:
+        """Render ``Refresh (secondary)`` with the parenthetical dimmed.
+
+        Keeping both halves on one line (rather than right-aligning via
+        a tab stop) sidesteps the menu's variable content width — the
+        freshness hint follows ``Refresh`` at a predictable distance
+        regardless of how wide the graph is laid out.
+        """
+        primary = "Refresh"
+        joiner = " ("
+        closer = ")"
+        full = f"{primary}{joiner}{secondary}{closer}"
+        attr = NSMutableAttributedString.alloc().initWithString_(full)
+        full_range = (0, len(full))
+        attr.addAttribute_value_range_(
+            NSFontAttributeName, NSFont.menuFontOfSize_(0), full_range
+        )
+        secondary_start = len(primary)
+        secondary_len = len(joiner) + len(secondary) + len(closer)
+        attr.addAttribute_value_range_(
+            NSForegroundColorAttributeName,
+            NSColor.secondaryLabelColor(),
+            (secondary_start, secondary_len),
+        )
+        self._refresh_item._menuitem.setAttributedTitle_(attr)
 
     def _session_refresh_then_tick(self, *, log_label: str) -> None:
         """POST /auth/refresh on the daemon, then pull current reading + graph."""
@@ -1016,7 +1055,7 @@ class GlucoseApp(rumps.App):
             return False, "", ""
         ok, password = _osascript_dialog(
             title="LibreLinkUp password",
-            message="This is saved in your Mac Keychain, not as a plain file.",
+            message="This is saved in your Mac Keychain.",
             ok="Save",
             hidden_answer=True,
         )
