@@ -61,7 +61,7 @@ from macos_frontend.api_client import (  # noqa: E402
 )
 from macos_frontend.graph_view import GlucoseGraphView, GraphThresholds  # noqa: E402
 
-# Graph sits in the dropdown under the freshness and units text rows.
+# Graph sits in the dropdown under the freshness text row.
 # 8 hours is the sweet spot between "see today's pattern" and "fits in a
 # menu item without dominating the screen". Width is wide enough to make
 # minute-resolution shape visible but not so wide that the menu overflows.
@@ -459,23 +459,21 @@ def _color_for(value_mg_dl: float, t: ColorThresholds):
     return NSColor.systemGreenColor()
 
 
-def _reading_menu_labels(reading: CurrentReading) -> tuple[str, str]:
-    """Two menu rows: freshness (with sample clock in parens) and display units."""
+def _reading_menu_labels(reading: CurrentReading) -> tuple[str, str | None]:
+    """Primary menu row and optional second row (error detail only)."""
     if reading.status in ("ok", "stale"):
         local_hhmm = _to_local_hhmm(reading.sensor_timestamp)
         age = _humanize_age(reading.reading_age_seconds)
-        unit = reading.unit or ""
         if local_hhmm != "—":
-            updated_line = f"Last updated {age} at {local_hhmm}"
+            updated_line = f"Updated: {age} at {local_hhmm}"
         else:
-            updated_line = f"Last updated {age}"
-        unit_line = f"Unit: {unit}" if unit else "Unit: —"
-        return (updated_line, unit_line)
+            updated_line = f"Updated: {age}"
+        return (updated_line, None)
     status = _STATUS_TEXT.get(reading.status, "Unavailable")
     detail = _DETAIL_TEXT.get(reading.status, "")
     if detail:
         return (status, detail)
-    return (status, "—")
+    return (status, None)
 
 
 def _humanize_age(age_seconds: int | None) -> str:
@@ -545,6 +543,11 @@ class _StatusItemMenuPresenter(NSObject):
 
     def showGlucoseMenu_(self, sender):
         app = self._glucose_app
+        # If the daemon was unreachable on the last poll, retry once when the
+        # user opens the menu so a slow-starting daemon is picked up without
+        # waiting for the next periodic tick.
+        if getattr(app, "_daemon_unreachable", False):
+            app._on_tick(None)
         ns_menu = app._menu._menu
         button = sender
         ns_menu.sizeToFit()
@@ -571,7 +574,8 @@ class GlucoseApp(rumps.App):
         self.thresholds = thresholds
 
         self._reading_updated_item = rumps.MenuItem("Connecting…")
-        self._units_item = rumps.MenuItem("—")
+        self._detail_item = rumps.MenuItem("")
+        self._daemon_unreachable = False
         self._refresh_item = rumps.MenuItem("Refresh Now", callback=self._on_refresh)
         self._reauth_item = rumps.MenuItem(
             "Refresh LibreLinkUp Session", callback=self._on_reauth
@@ -592,9 +596,10 @@ class GlucoseApp(rumps.App):
         self._graph_item = rumps.MenuItem("")
         self._graph_item._menuitem.setView_(self._graph_view)
 
+        self._detail_item._menuitem.setHidden_(True)
         self.menu = [
             self._reading_updated_item,
-            self._units_item,
+            self._detail_item,
             self._graph_item,
             None,
             self._refresh_item,
@@ -818,19 +823,24 @@ class GlucoseApp(rumps.App):
             reading = self._client.current()
         except DaemonUnreachable as e:
             log.warning("Daemon unreachable: %s", e)
+            self._daemon_unreachable = True
             self._apply_title_parts("⚠ Not Connected", "", "", color=None)
             self._reading_updated_item.title = "Can't reach FreeStyle LibreLink"
-            self._units_item.title = "—"
+            self._detail_item.title = ""
+            self._detail_item._menuitem.setHidden_(True)
             self._graph_view.setPoints_([])
             return
         except DaemonError as e:
             log.warning("Daemon error: %s", e)
+            self._daemon_unreachable = False
             self._apply_title_parts("⚠ Error", "", "", color=None)
             self._reading_updated_item.title = "Couldn't load your reading"
-            self._units_item.title = "—"
+            self._detail_item.title = ""
+            self._detail_item._menuitem.setHidden_(True)
             self._graph_view.setPoints_([])
             return
 
+        self._daemon_unreachable = False
         value_part, arrow_part, trailing_part = _title_parts(reading)
         # Only colour when we actually have a numeric value to evaluate.
         # Stale readings still get coloured (the value is the most recent
@@ -841,9 +851,14 @@ class GlucoseApp(rumps.App):
             color = _color_for(value_for_color, self.thresholds)
         self._apply_title_parts(value_part, arrow_part, trailing_part, color=color)
 
-        u_line, units_line = _reading_menu_labels(reading)
-        self._reading_updated_item.title = u_line
-        self._units_item.title = units_line
+        primary, secondary = _reading_menu_labels(reading)
+        self._reading_updated_item.title = primary
+        if secondary:
+            self._detail_item.title = secondary
+            self._detail_item._menuitem.setHidden_(False)
+        else:
+            self._detail_item.title = ""
+            self._detail_item._menuitem.setHidden_(True)
 
         self._refresh_graph()
 
@@ -871,17 +886,22 @@ class GlucoseApp(rumps.App):
             very_high=self.thresholds.very_high,
         )
 
-    def _on_refresh(self, _sender) -> None:
-        log.info("Manual refresh")
-        self._on_tick(None)
-
-    def _on_reauth(self, _sender) -> None:
-        log.info("Force re-authenticate")
+    def _session_refresh_then_tick(self, *, log_label: str) -> None:
+        """POST /auth/refresh on the daemon, then pull current reading + graph."""
+        log.info("%s", log_label)
         try:
             self._client.force_refresh()
         except Exception as e:  # noqa: BLE001
-            log.warning("Re-auth failed: %s", e)
+            log.warning("LibreLinkUp session refresh failed: %s", e)
         self._on_tick(None)
+
+    def _on_refresh(self, _sender) -> None:
+        # Same backend path as “Refresh LibreLinkUp Session” so one click
+        # re-authenticates against Abbott and immediately updates the UI.
+        self._session_refresh_then_tick(log_label="Refresh Now")
+
+    def _on_reauth(self, _sender) -> None:
+        self._session_refresh_then_tick(log_label="Refresh LibreLinkUp Session")
 
     def _on_edit_credentials(self, _sender) -> None:
         log.info("Update credentials clicked")

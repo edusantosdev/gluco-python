@@ -1,6 +1,6 @@
 """Custom ``NSView`` that renders the recent glucose trace inside a menu item.
 
-Lives in the menubar dropdown below the freshness / units text rows. The drawing is
+Lives in the menubar dropdown below the freshness text row. The drawing is
 deliberately Spartan: faint horizontal threshold bands, a single polyline
 through the cached readings, and a coloured dot on the latest sample. No
 animation, no interaction — a glance graph, not an explorer.
@@ -38,9 +38,11 @@ from AppKit import (
 log = logging.getLogger("glucose.frontend.graph")
 
 # --- layout (in points) ---
-# Plot area = view bounds minus padding. Left padding leaves room for a
-# couple of mg/dL labels; bottom padding leaves room for the time axis.
-_PAD_LEFT = 28
+# Plot area = view bounds minus padding. Y-axis labels are drawn in a tight
+# column along the view's leading edge so the plot lines up with menu text
+# rows above; bottom padding leaves room for the time axis.
+_LABEL_INSET_X = 4.0
+_LABEL_TO_PLOT_GAP = 5.0
 _PAD_RIGHT = 8
 _PAD_TOP = 6
 _PAD_BOTTOM = 16
@@ -98,10 +100,11 @@ class GlucoseGraphView(NSView):
     def drawRect_(self, _dirty):  # noqa: N802 - Obj-C selector
         try:
             bounds = self.bounds()
+            plot_left = self._plot_left_edge()
             plot = NSMakeRect(
-                _PAD_LEFT,
+                plot_left,
                 _PAD_BOTTOM,
-                bounds.size.width - _PAD_LEFT - _PAD_RIGHT,
+                bounds.size.width - plot_left - _PAD_RIGHT,
                 bounds.size.height - _PAD_TOP - _PAD_BOTTOM,
             )
             if plot.size.width <= 0 or plot.size.height <= 0:
@@ -159,6 +162,20 @@ class GlucoseGraphView(NSView):
             color.colorWithAlphaComponent_(alpha).setFill()
             NSRectFill(NSMakeRect(plot.origin.x, y0, plot.size.width, y1 - y0))
 
+    def _plot_left_edge(self) -> float:
+        """Leading X for the plot: labels flush left, then a small gap."""
+        t = self._thresholds
+        if t is None:
+            return _LABEL_INSET_X + _LABEL_TO_PLOT_GAP
+        attrs = self._small_text_attrs()
+        max_w = 0.0
+        for value in (t.low, t.high):
+            label = NSAttributedString.alloc().initWithString_attributes_(
+                f"{int(value)}", attrs
+            )
+            max_w = max(max_w, float(label.size().width))
+        return _LABEL_INSET_X + max_w + _LABEL_TO_PLOT_GAP
+
     def _draw_y_labels(self, plot) -> None:
         t = self._thresholds
         if t is None:
@@ -171,7 +188,7 @@ class GlucoseGraphView(NSView):
             )
             size = label.size()
             label.drawAtPoint_(
-                NSMakePoint(plot.origin.x - size.width - 3, y - size.height / 2)
+                NSMakePoint(_LABEL_INSET_X, y - size.height / 2)
             )
 
     def _draw_threshold_guides(self, plot) -> None:
