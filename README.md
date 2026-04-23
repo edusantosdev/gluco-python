@@ -8,11 +8,42 @@ Personal macOS menubar glucose display for LibreLinkUp.
 
 For design details, see [`glucose-menubar-implementation-plan.md`](./glucose-menubar-implementation-plan.md) (the phased design journal) and [`ENGINEERING.md`](./ENGINEERING.md) (how the current code fits together).
 
-## Requirements
+## Prerequisites
 
-- macOS (frontend uses AppKit via PyObjC)
-- Python 3.11+
-- LibreLinkUp account credentials
+This app is a **read-only** LibreLinkUp client — it does not talk to the sensor directly. The full data path is:
+
+`Sensor → FreeStyle LibreLink app (phone) → LibreView cloud → LibreLinkUp → this app`
+
+For anything to show up in the menubar, **all** of the following must be true:
+
+1. **Compatible Abbott sensor applied and active**: FreeStyle Libre 2, Libre 2 Plus, or Libre 3. Libre 1 is not supported by LibreLinkUp.
+2. **FreeStyle LibreLink app** installed on the wearer's phone, paired with the sensor, running (kept open/in the background), with **Bluetooth enabled** on the phone. If the LibreLink app is force-closed or Bluetooth is off, new readings stop flowing to the cloud and this menubar will show stale/`Connecting…`.
+3. **LibreLinkUp account** created and connected as a follower of the LibreLink user (see below).
+4. **macOS** with Python 3.11+ (the frontend uses AppKit via PyObjC).
+
+### Create a LibreLinkUp account and connect it
+
+LibreLinkUp is Abbott's free "follower" app — separate from FreeStyle LibreLink. You'll end up with **two accounts**: the wearer's LibreLink account, and your LibreLinkUp follower account (they can be the same email if you're following yourself).
+
+1. Install **LibreLinkUp** on any phone ([iOS](https://apps.apple.com/app/librelinkup/id1234323923) / [Android](https://play.google.com/store/apps/details?id=org.nativescript.LibreLinkUp)) and sign up for a new account. Accept the terms of use on first login.
+2. On the wearer's phone, open **FreeStyle LibreLink** → menu → **Connected Apps** → **LibreLinkUp** → **Connect** and enter the LibreLinkUp email to invite as a follower.
+3. Open **LibreLinkUp** and accept the pending invitation. Once accepted and a reading is visible in LibreLinkUp, the same credentials will work in this app.
+
+Use the **LibreLinkUp** email/password (not the LibreLink one) for `LIBRELINKUP_EMAIL` / `LIBRELINKUP_PASSWORD` below.
+
+## Quick Install
+
+Once the prerequisites above are in place:
+
+```bash
+git clone https://github.com/edusantosdev/librelinkup-glucose-menubar-python.git
+cd librelinkup-glucose-menubar-python
+python3 -m venv .venv && .venv/bin/python -m pip install -e .
+cp .env.example .env && $EDITOR .env   # set LIBRELINKUP_EMAIL / PASSWORD / REGION
+.venv/bin/python scripts/phase0_probe.py       # verify credentials/region
+.venv/bin/python scripts/set_credentials.py    # move creds into Keychain (recommended)
+scripts/install_launchagent.sh install         # auto-start daemon + menubar on login
+```
 
 ## Quick Start (Recommended)
 
