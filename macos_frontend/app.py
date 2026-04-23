@@ -102,6 +102,8 @@ _PULSE_PERIOD_S = 2.0
 _PULSE_TICK_S = 0.1
 _PULSE_MIN_ALPHA = 0.45
 _ARROW_PULSE_SYMBOLS = frozenset({"↓", "↘", "↗", "↑"})
+_AUTH_RETRY_CHECK_TIMEOUT_S = 12.0
+_AUTH_RETRY_CHECK_INTERVAL_S = 0.75
 
 # How long to wait after the AppKit runloop starts before popping the
 # first-run credentials modal. Short enough that a fresh user never
@@ -1287,6 +1289,25 @@ class GlucoseApp(rumps.App):
             log.warning("LibreView session refresh failed: %s", e)
         self._on_tick(None)
 
+    def _check_sign_in_status_after_restart(self) -> str | None:
+        """Poll daemon status briefly after a credential save + restart.
+
+        Returns a status string (for example ``ok``, ``stale``, ``auth_failed``)
+        when one is observed before timeout, otherwise ``None``.
+        """
+        deadline = time.monotonic() + _AUTH_RETRY_CHECK_TIMEOUT_S
+        while time.monotonic() < deadline:
+            try:
+                reading = self._client.current()
+            except (DaemonNotReady, DaemonUnreachable, DaemonError):
+                time.sleep(_AUTH_RETRY_CHECK_INTERVAL_S)
+                continue
+            if reading.status == "starting":
+                time.sleep(_AUTH_RETRY_CHECK_INTERVAL_S)
+                continue
+            return reading.status
+        return None
+
     def _on_refresh(self, _sender) -> None:
         self._session_refresh_then_tick(log_label="Refresh")
 
@@ -1325,59 +1346,73 @@ class GlucoseApp(rumps.App):
         framing) and the success alert (a friendly "you're signed
         in" message rather than the generic edit confirmation).
         """
-        ok, email, password = _run_on_main_and_wait(
-            lambda: _native_credentials_dialog(
-                current_email="",
-                current_password="",
-                title="Welcome to Glucobar",
-                body_text=(
-                    "Sign in with your LibreView account so Glucobar can read "
-                    "your glucose readings. Your email and password are stored "
-                    "securely in your Mac Keychain and never sent anywhere else."
-                ),
-                save_button="Sign In",
+        default_email = ""
+        default_password = ""
+        while True:
+            ok, email, password = _run_on_main_and_wait(
+                lambda: _native_credentials_dialog(
+                    current_email=default_email,
+                    current_password=default_password,
+                    title="Welcome to Glucobar",
+                    body_text=(
+                        "Sign in with your LibreView account so Glucobar can read "
+                        "your glucose readings. Your email and password are stored "
+                        "securely in your Mac Keychain and never sent anywhere else."
+                    ),
+                    save_button="Sign In",
+                )
             )
-        )
-        if not ok:
-            log.info("First-run credentials prompt cancelled")
-            return
-        email = email.strip()
-        if not email or not password:
+            if not ok:
+                log.info("First-run credentials prompt cancelled")
+                return
+            email = email.strip()
+            default_email = email
+            default_password = password
+            if not email or not password:
+                self._show_alert(
+                    title="Sign-in incomplete",
+                    message=(
+                        "Glucobar needs both your email and your LibreView "
+                        "password. Please check both fields and try again."
+                    ),
+                )
+                continue
+            try:
+                save_credentials(email=email, password=password)
+            except Exception as e:  # noqa: BLE001
+                log.exception("Could not save first-run credentials")
+                self._show_alert(
+                    title="Couldn't save sign-in",
+                    message=(
+                        f"{e}\n\nGlucobar couldn't write to your Mac Keychain. "
+                        "Please try again."
+                    ),
+                )
+                continue
+            log.info("Saved LibreView credentials from first-run prompt")
+            # Daemon is in the supervisor's sticky EX_CONFIG state; nudge
+            # it so it respawns now with the new Keychain entry instead of
+            # waiting for the user to poke the menu.
+            _kickstart_daemon()
+            status = self._check_sign_in_status_after_restart()
+            if status == "auth_failed":
+                self._show_alert(
+                    title="Sign-in failed",
+                    message=(
+                        "LibreView rejected that email or password. "
+                        "Please check your credentials and try again."
+                    ),
+                )
+                continue
             self._show_alert(
-                title="Sign-in incomplete",
+                title="You're signed in",
                 message=(
-                    "Glucobar needs both your email and your LibreView "
-                    f"password. Open {_LIBREVIEW_ACCOUNT_TITLE} from the "
-                    "menu when you're ready to try again."
+                    "Glucobar is connecting to LibreView with your account now. "
+                    "Your first glucose reading should appear in the menubar "
+                    "shortly."
                 ),
             )
             return
-        try:
-            save_credentials(email=email, password=password)
-        except Exception as e:  # noqa: BLE001
-            log.exception("Could not save first-run credentials")
-            self._show_alert(
-                title="Couldn't save sign-in",
-                message=(
-                    f"{e}\n\nGlucobar couldn't write to your Mac Keychain. "
-                    f"Open {_LIBREVIEW_ACCOUNT_TITLE} from the menu to try "
-                    "again."
-                ),
-            )
-            return
-        log.info("Saved LibreView credentials from first-run prompt")
-        # Daemon is in the supervisor's sticky EX_CONFIG state; nudge
-        # it so it respawns now with the new Keychain entry instead of
-        # waiting for the user to poke the menu.
-        _kickstart_daemon()
-        self._show_alert(
-            title="You're signed in",
-            message=(
-                "Glucobar is connecting to LibreView with your account now. "
-                "Your first glucose reading should appear in the menubar "
-                "shortly."
-            ),
-        )
 
     def _update_startup_item(self) -> None:
         enabled = _frontend_startup_enabled()
@@ -1445,65 +1480,73 @@ class GlucoseApp(rumps.App):
         bundled helper process.
         """
         pref_email, pref_password = _credentials_dialog_prefill()
-        if _is_bundled():
-            ok, email, password = _run_on_main_and_wait(
-                lambda: _native_credentials_dialog(
-                    current_email=pref_email,
-                    current_password=pref_password,
+        while True:
+            if _is_bundled():
+                ok, email, password = _run_on_main_and_wait(
+                    lambda: _native_credentials_dialog(
+                        current_email=pref_email,
+                        current_password=pref_password,
+                    )
                 )
-            )
-        else:
-            ok, email, password = self._osascript_credentials_prompt(
-                default_email=pref_email,
-            )
-        if not ok:
-            return
+            else:
+                ok, email, password = self._osascript_credentials_prompt(
+                    default_email=pref_email,
+                )
+            if not ok:
+                return
 
-        email = email.strip()
-        if not email:
-            self._show_alert(
-                title="Email missing",
-                message=(
-                    "Enter the email for your LibreView account, then open "
-                    f"{_LIBREVIEW_ACCOUNT_TITLE} again."
-                ),
-            )
-            return
-        if not password:
-            self._show_alert(
-                title="Password missing",
-                message=(
-                    "Enter your LibreView password, then open "
-                    f"{_LIBREVIEW_ACCOUNT_TITLE} again."
-                ),
-            )
-            return
+            email = email.strip()
+            pref_email = email
+            pref_password = password
+            if not email:
+                self._show_alert(
+                    title="Email missing",
+                    message="Enter the email for your LibreView account, then try again.",
+                )
+                continue
+            if not password:
+                self._show_alert(
+                    title="Password missing",
+                    message="Enter your LibreView password, then try again.",
+                )
+                continue
 
-        try:
-            save_credentials(email=email, password=password)
-        except Exception as e:  # noqa: BLE001
+            try:
+                save_credentials(email=email, password=password)
+            except Exception as e:  # noqa: BLE001
+                self._show_alert(
+                    title="Couldn't save sign-in",
+                    message=(
+                        f"{e}\n\n"
+                        "Glucobar only reads LibreView credentials from the macOS "
+                        "Keychain, so they need to land there before the daemon "
+                        "can sign in."
+                    ),
+                )
+                continue
+            # Kick the daemon so it re-authenticates with the new credentials
+            # right away, instead of either waiting for its next poll (if
+            # already running under the old creds) or for launchd's throttled
+            # respawn (if it exited on missing-credentials before first run).
+            _kickstart_daemon()
+            status = self._check_sign_in_status_after_restart()
+            if status == "auth_failed":
+                self._show_alert(
+                    title="Sign-in failed",
+                    message=(
+                        "LibreView rejected that email or password. "
+                        "Please check your credentials and try again."
+                    ),
+                )
+                continue
             self._show_alert(
-                title="Couldn't save sign-in",
+                title="Sign-in saved",
                 message=(
-                    f"{e}\n\n"
-                    "Glucobar only reads LibreView credentials from the macOS "
-                    "Keychain, so they need to land there before the daemon "
-                    "can sign in."
+                    "Saved to your Mac Keychain. "
+                    "Glucobar is reconnecting with these details now."
                 ),
             )
             return
-        # Kick the daemon so it re-authenticates with the new credentials
-        # right away, instead of either waiting for its next poll (if
-        # already running under the old creds) or for launchd's throttled
-        # respawn (if it exited on missing-credentials before first run).
-        _kickstart_daemon()
-        self._show_alert(
-            title="Sign-in saved",
-            message=(
-                "Saved to your Mac Keychain. "
-                "Glucobar is reconnecting with these details now."
-            ),
-        )
 
     def _osascript_credentials_prompt(
         self, *, default_email: str = ""
