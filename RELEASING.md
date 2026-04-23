@@ -1,121 +1,73 @@
 # Releasing Glucobar
 
-This runbook covers local build, GitHub release assets, and Homebrew cask updates.
+Short release checklist for macOS artifacts and Homebrew cask updates.
+Release automation lives in `.github/workflows/release.yml`.
 
-## Prerequisites
-
-- macOS machine with Xcode command-line tools
-- Repo checkout with clean working tree (or only intentional release changes)
-- Python 3.11+ and local `.venv`
-- GitHub permissions to create tags/releases
-- Write access to your Homebrew tap repo
-
-## 1) Build and test
-
-From repo root:
+## 1. Build and test locally
 
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install -e .[dev,build]
 .venv/bin/python -m pytest tests/
+.venv/bin/python -m ruff check .
 scripts/build_portable_app.sh
 ```
 
-Expected artifact:
+Output: `dist/Glucobar.app`.
 
-- `dist/Glucobar.app`
-
-## 2) Package release zip + SHA256
-
-Choose the version tag (example `v0.3.0`) and run:
+## 2. Package a release artifact
 
 ```bash
-scripts/package_release_artifact.sh --version v0.3.0 --repo eduardo/librelinkup-glucose-menubar-python
+scripts/package_release_artifact.sh --version vX.Y.Z --repo <owner>/<repo>
 ```
 
-Outputs:
+Outputs under `release/`:
 
-- `release/Glucobar-v0.3.0-macos.zip`
-- `release/Glucobar-v0.3.0-macos.zip.sha256`
-- `release/homebrew-cask-snippet.rb`
+- `Glucobar-vX.Y.Z-macos.zip`
+- `Glucobar-vX.Y.Z-macos.zip.sha256`
+- `homebrew-cask-snippet.rb`
 
-## 3) Create GitHub tag (workflow publishes release assets)
+Without `--version`, the script reads the version from `pyproject.toml`.
 
-Create and push the tag:
+## 3. Publish to GitHub
+
+Tag-triggered workflow:
 
 ```bash
-git tag v0.3.0
-git push origin v0.3.0
+git tag vX.Y.Z
+git push origin vX.Y.Z
 ```
 
-This triggers `.github/workflows/release.yml`, which:
+This runs lint + tests, builds the app, packages the zip/SHA, and
+uploads all three artifacts to the GitHub release for the tag.
 
-- installs deps (`.[dev,build]`)
-- runs tests
-- builds `dist/Glucobar.app`
-- packages `release/Glucobar-vX.Y.Z-macos.zip` + `.sha256`
-- uploads assets to the GitHub release for that tag
+You can also trigger the workflow manually via
+`workflow_dispatch` (`inputs.version`).
 
-After the workflow completes, verify assets are present in the release page.
+## 4. Update the Homebrew tap cask
 
-If you need a manual fallback, you can still run:
+In your tap, edit `Casks/glucobar.rb`:
 
-```bash
-gh release create v0.3.0 \
-  "release/Glucobar-v0.3.0-macos.zip" \
-  --title "v0.3.0" \
-  --notes "Release notes here."
-```
+- `version "X.Y.Z"`
+- `sha256` from the release `.sha256` file
+- URL must resolve to:
+  `https://github.com/<owner>/<repo>/releases/download/vX.Y.Z/Glucobar-vX.Y.Z-macos.zip`
 
-The cask URL must match this pattern:
+Commit and push in the tap repo.
 
-- `https://github.com/eduardo/librelinkup-glucose-menubar-python/releases/download/v0.3.0/Glucobar-v0.3.0-macos.zip`
-
-## 4) Update Homebrew tap cask
-
-In your tap repo, update `Casks/glucobar.rb`:
-
-- `version` to the new version (without leading `v`)
-- `sha256` to the hash from `.sha256`
-- keep URL in the `v#{version}`/`Glucobar-v#{version}-macos.zip` format
-
-Reference cask file/template:
-
-- `packaging/homebrew-tap/Casks/glucobar.rb`
-- `release/homebrew-cask-snippet.rb`
-
-Commit and push in tap repo:
-
-```bash
-git add Casks/glucobar.rb
-git commit -m "glucobar 0.3.0"
-git push
-```
-
-## 5) Verify install from tap
-
-On a clean machine or fresh shell:
+## 5. Verify install
 
 ```bash
 brew update
 brew tap <your-org>/<your-tap>
 brew install --cask glucobar
-```
-
-Then launch once:
-
-```bash
 open -a Glucobar
 ```
 
-## 6) Optional post-release checks
-
-- `brew uninstall --cask glucobar` and reinstall
-- `brew upgrade --cask glucobar` from previous version
-- Validate Keychain prompt and first-run credentials flow
-- Confirm menubar **Open at Login** toggles correctly
+Optionally `brew upgrade --cask glucobar` from the previous version.
 
 ## Notes
 
-- Current artifacts are unsigned and not notarized.
-- Before broad distribution, add Developer ID signing + notarization in CI.
+- Artifacts are currently unsigned and not notarized.
+- For a manual fallback (no tag workflow), use
+  `gh release create vX.Y.Z release/Glucobar-vX.Y.Z-macos.zip`.

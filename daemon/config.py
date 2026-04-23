@@ -22,6 +22,9 @@ if str(_REPO_ROOT) not in sys.path:
 from glucose_common.credentials import load_credentials  # noqa: E402
 from glucose_common.regions import guess_libreview_region  # noqa: E402
 
+_POLL_INTERVAL_SECONDS = 60
+_STALE_AFTER_SECONDS = 360
+
 
 def _default_state_dir() -> Path:
     return Path.home() / ".glucobar"
@@ -46,13 +49,6 @@ class Settings(BaseSettings):
         default_factory=guess_libreview_region,
         alias="LIBREVIEW_REGION",
     )
-
-    poll_interval_seconds: int = Field(default=60, alias="POLL_INTERVAL_SECONDS")
-
-    # Reading is "stale" if the sensor timestamp is older than this many seconds.
-    # FreeStyle Libre 3 pushes ~every minute; 6 minutes is generous but catches
-    # genuine loss-of-signal.
-    stale_after_seconds: int = Field(default=360, alias="STALE_AFTER_SECONDS")
 
     # HTTP server bind. 127.0.0.1 only — this daemon is not a public service.
     host: str = Field(default="127.0.0.1", alias="DAEMON_HOST")
@@ -91,6 +87,16 @@ class Settings(BaseSettings):
     @property
     def log_path(self) -> Path:
         return self.state_dir / "daemon.log"
+
+    @property
+    def poll_interval_seconds(self) -> int:
+        # Fixed daemon cadence; no env override.
+        return _POLL_INTERVAL_SECONDS
+
+    @property
+    def stale_after_seconds(self) -> int:
+        # Reading is "stale" when older than 6 minutes.
+        return _STALE_AFTER_SECONDS
 
 
 class MissingCredentialsError(RuntimeError):

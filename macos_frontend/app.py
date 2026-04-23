@@ -104,6 +104,10 @@ _PULSE_MIN_ALPHA = 0.45
 _ARROW_PULSE_SYMBOLS = frozenset({"↓", "↘", "↗", "↑"})
 _AUTH_RETRY_CHECK_TIMEOUT_S = 12.0
 _AUTH_RETRY_CHECK_INTERVAL_S = 0.75
+_FRONTEND_POLL_SECONDS = 30
+_THRESHOLD_LOW_MG_DL = 70.0
+_THRESHOLD_HIGH_MG_DL = 180.0
+_THRESHOLD_VERY_HIGH_MG_DL = 250.0
 
 # How long to wait after the AppKit runloop starts before popping the
 # first-run credentials modal. Short enough that a fresh user never
@@ -696,14 +700,6 @@ class ColorThresholds:
     low: float
     high: float
     very_high: float
-
-    @classmethod
-    def from_env(cls) -> ColorThresholds:
-        return cls(
-            low=float(os.environ.get("THRESHOLD_LOW_MG_DL", "70")),
-            high=float(os.environ.get("THRESHOLD_HIGH_MG_DL", "180")),
-            very_high=float(os.environ.get("THRESHOLD_VERY_HIGH_MG_DL", "250")),
-        )
 
 
 def _color_for(value_mg_dl: float, t: ColorThresholds):
@@ -1619,8 +1615,12 @@ def main() -> int:
     _ensure_bundled_launch()
     _hide_dock_icon_by_default()
     base_url = os.environ.get("DAEMON_URL", "http://127.0.0.1:8765")
-    poll_interval = int(os.environ.get("FRONTEND_POLL_SECONDS", "30"))
-    thresholds = ColorThresholds.from_env()
+    poll_interval = _FRONTEND_POLL_SECONDS
+    thresholds = ColorThresholds(
+        low=_THRESHOLD_LOW_MG_DL,
+        high=_THRESHOLD_HIGH_MG_DL,
+        very_high=_THRESHOLD_VERY_HIGH_MG_DL,
+    )
 
     # Start the daemon supervisor before GlucoseApp.__init__. With no
     # credentials in the Keychain the supervised daemon will exit 78
