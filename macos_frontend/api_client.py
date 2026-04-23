@@ -6,6 +6,7 @@ directly, and it should never need anything more than what's exposed here.
 
 from __future__ import annotations
 
+import errno
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -17,8 +18,42 @@ class DaemonUnreachable(RuntimeError):
     """Raised when the daemon doesn't respond at all."""
 
 
+class DaemonNotReady(DaemonUnreachable):
+    """Raised when nothing is listening on the daemon port yet (typ. still booting)."""
+
+
 class DaemonError(RuntimeError):
     """Raised on a 5xx (other than 503-starting) from the daemon."""
+
+
+def _exception_chain_has_econnrefused(exc: BaseException) -> bool:
+    """True if ``exc`` carries a refused TCP connect (cause chain or nested args).
+
+    ``httpcore`` wraps ``ConnectionRefusedError`` as ``ConnectError.args[0]``;
+    ``__cause__`` alone does not always reach it.
+    """
+    seen: set[int] = set()
+    stack: list[BaseException] = [exc]
+    while stack:
+        cur = stack.pop()
+        if id(cur) in seen:
+            continue
+        seen.add(id(cur))
+        if isinstance(cur, ConnectionRefusedError):
+            return True
+        if isinstance(cur, OSError) and cur.errno == errno.ECONNREFUSED:
+            return True
+        if cur.__cause__ is not None:
+            stack.append(cur.__cause__)
+        for arg in getattr(cur, "args", ()):
+            if isinstance(arg, BaseException):
+                stack.append(arg)
+    return False
+
+
+def _transport_is_daemon_socket_not_ready(exc: httpx.HTTPError) -> bool:
+    """Connection failed before an HTTP response — usual race right after login/install."""
+    return isinstance(exc, httpx.ConnectError) and _exception_chain_has_econnrefused(exc)
 
 
 @dataclass
@@ -58,6 +93,8 @@ class DaemonClient:
         try:
             resp = self._client.get("/glucose/current")
         except httpx.HTTPError as e:
+            if _transport_is_daemon_socket_not_ready(e):
+                raise DaemonNotReady(str(e)) from e
             raise DaemonUnreachable(str(e)) from e
         if resp.status_code == 503:
             # "Daemon starting" — treat as a transient state, not an error.
@@ -86,12 +123,15 @@ class DaemonClient:
         """Fetch cached historical readings from the daemon (oldest first).
 
         Returns ``[]`` if the daemon hasn't completed a successful poll yet.
-        Raises ``DaemonUnreachable`` on transport errors and ``DaemonError``
-        on 5xx responses, matching the ``current()`` contract.
+        Raises ``DaemonUnreachable`` / ``DaemonNotReady`` on transport errors
+        and ``DaemonError`` on 5xx responses, matching the ``current()``
+        contract.
         """
         try:
             resp = self._client.get("/glucose/graph", params={"hours": hours})
         except httpx.HTTPError as e:
+            if _transport_is_daemon_socket_not_ready(e):
+                raise DaemonNotReady(str(e)) from e
             raise DaemonUnreachable(str(e)) from e
         if resp.status_code >= 500:
             raise DaemonError(f"{resp.status_code} {resp.text[:200]}")

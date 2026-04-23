@@ -57,6 +57,7 @@ from macos_frontend.api_client import (  # noqa: E402
     CurrentReading,
     DaemonClient,
     DaemonError,
+    DaemonNotReady,
     DaemonUnreachable,
 )
 from macos_frontend.graph_view import GlucoseGraphView, GraphThresholds  # noqa: E402
@@ -384,7 +385,9 @@ def _native_credentials_dialog(
 #   starting up, sensor still warming up, backend told us to slow down,
 #   or a stale cache with no value yet). No ``⚠`` because there's nothing
 #   for the user to do.
-# * ``⚠ Offline`` — we can't reach the data source right now.
+# * ``⚠ Offline`` — we can't reach the local daemon over HTTP (timeouts,
+#   resets, etc.). A ``connection refused`` while its socket is still
+#   down uses ``Connecting…`` instead, same family as HTTP 503 ``starting``.
 # * ``⚠ Sign In`` — the user has to go fix something at the sign-in
 #   layer (wrong credentials *or* an unaccepted Terms-of-Service prompt
 #   in the FreeStyle LibreLink phone app). Both paths funnel the user
@@ -588,7 +591,7 @@ class GlucoseApp(rumps.App):
 
         # The menubar title carries the full status story (number, trend
         # arrow, or an error glyph), so the dropdown holds no text row —
-        # Refresh, graph, then account. ``rumps.MenuItem``
+        # Graph, then Refresh and account. ``rumps.MenuItem``
         # wraps an ``NSMenuItem`` (exposed as ``._menuitem``); attaching
         # a custom NSView via ``setView_`` is the supported way to embed
         # non-text content in an AppKit menu. The empty title is ignored
@@ -601,9 +604,8 @@ class GlucoseApp(rumps.App):
         self._graph_item._menuitem.setView_(self._graph_view)
 
         self.menu = [
-            self._refresh_item,
-            None,
             self._graph_item,
+            self._refresh_item,
             None,
             self._creds_item,
         ]
@@ -821,6 +823,17 @@ class GlucoseApp(rumps.App):
     def _on_tick(self, _sender) -> None:
         try:
             reading = self._client.current()
+        except DaemonNotReady as e:
+            # Race after login / ``install_launchagent``: menubar often
+            # polls before the daemon's HTTP server is bound. Same glyph
+            # family as HTTP 503 ``starting`` — not ``Offline``, which
+            # reads like a WAN outage.
+            log.warning("Daemon not accepting connections yet: %s", e)
+            self._daemon_unreachable = True
+            self._apply_title_parts("Connecting…", "", "", color=None)
+            self._graph_view.setPoints_([])
+            self._update_refresh_item()
+            return
         except DaemonUnreachable as e:
             log.warning("Daemon unreachable: %s", e)
             self._daemon_unreachable = True
@@ -864,7 +877,7 @@ class GlucoseApp(rumps.App):
         """
         try:
             points = self._client.graph(hours=_GRAPH_HOURS)
-        except (DaemonUnreachable, DaemonError) as e:
+        except (DaemonNotReady, DaemonUnreachable, DaemonError) as e:
             log.debug("Graph fetch failed: %s", e)
             self._graph_view.setPoints_([])
             return
