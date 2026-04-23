@@ -588,7 +588,7 @@ class GlucoseApp(rumps.App):
 
         # The menubar title carries the full status story (number, trend
         # arrow, or an error glyph), so the dropdown holds no text row —
-        # just the graph and the two action buttons. ``rumps.MenuItem``
+        # Refresh, graph, then account. ``rumps.MenuItem``
         # wraps an ``NSMenuItem`` (exposed as ``._menuitem``); attaching
         # a custom NSView via ``setView_`` is the supported way to embed
         # non-text content in an AppKit menu. The empty title is ignored
@@ -601,9 +601,9 @@ class GlucoseApp(rumps.App):
         self._graph_item._menuitem.setView_(self._graph_view)
 
         self.menu = [
-            self._graph_item,
-            None,
             self._refresh_item,
+            None,
+            self._graph_item,
             None,
             self._creds_item,
         ]
