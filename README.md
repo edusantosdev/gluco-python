@@ -91,7 +91,7 @@ curl -s -X POST http://127.0.0.1:8765/auth/refresh | jq
 | daemon error   | `⚠ Error`        |
 
 
-Menu actions: **Refresh Now**, **Sign In Again**, **LibreLinkUp Account…**, **Quit**.
+Menu actions: **Refresh Now** (daemon `POST /auth/refresh` plus immediate UI poll), **LibreLinkUp Account…**, **Quit**.
 
 ## Configuration
 

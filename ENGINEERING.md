@@ -33,8 +33,7 @@ Two separate processes cooperate over local HTTP:
 │    │   ├── backoff state machine  │       │    │    POST /auth/refresh      │
 │    │   └── DaemonState snapshot   │       │    │                            │
 │    │                              │       │    ├── GlucoseGraphView (NSView)│
-│    └── HTTP 127.0.0.1:8765        │       │    ├── Notifier + policy        │
-│                                   │       │    └── NSAlert / osascript UI   │
+│    └── HTTP 127.0.0.1:8765        │       │    └── NSAlert / osascript UI   │
 └───────────────────────────────────┘       └─────────────────────────────────┘
          ▲                                                    ▲
          │                                                    │
@@ -222,8 +221,8 @@ output.
 
 Essentially nothing about LibreLinkUp. It consumes the daemon's
 `Status` enum as strings and maps them to menubar glyphs. No
-credentials live in the frontend process — even the "Update
-Credentials…" flow writes straight to Keychain via
+credentials live in the frontend process — even the **LibreLinkUp
+Account…** flow writes straight to Keychain via
 `glucose_common.credentials.save_credentials()`.
 
 ### Tick loop
@@ -238,16 +237,16 @@ Credentials…" flow writes straight to Keychain via
    - Everything else → a short glyph from `_STATUS_GLYPH`.
 3. Colour the title via `NSAttributedString` on the
    `NSStatusBarButton` (rumps' `self.title = …` only handles plain
-   text). Thresholds are in mg/dL, from env or the
-   **Set Thresholds…** dialog, and are applied to
+   text). Thresholds are in mg/dL, from env (`THRESHOLD_*_MG_DL` via
+   `ColorThresholds.from_env()`), and are applied to
    `value_in_mg_per_dl` so mmol/L users still get correct colours.
-4. Update the "Updated: 1 min ago at 14:32" row.
-5. Feed the reading to `Notifier.handle(...)`.
-6. Call `/glucose/graph` and push the points into
+4. Update the primary (and optional detail) menu text rows — for
+   example `Updated: 1 min ago at 14:32` when the reading is live.
+5. Call `/glucose/graph` and push the points into
    `GlucoseGraphView.setPoints_()`.
 
-Transport failures show as `⚠ Daemon Offline` / `⚠ Daemon Error` —
-the only states the daemon can't report about itself.
+Transport failures show as `⚠ Not Connected` / `⚠ Error` in the
+menubar title — the only states the daemon can't report about itself.
 
 ### The dropdown graph (`macos_frontend/graph_view.py`)
 
@@ -258,28 +257,9 @@ polyline, a coloured dot on the most recent sample. No interaction.
 Draw happens on the main thread; `setPoints_` calls
 `setNeedsDisplay:`, which AppKit documents as thread-safe.
 
-### Notifications (`macos_frontend/notifier.py`)
-
-`NotificationPolicy` is pure (feed it readings, get back events),
-which makes it trivially unit-testable with a fake clock. It fires:
-
-- **Threshold alarms** on *zone transitions* only, with hysteresis
-  (`±5 mg/dL`) to stop 178/181/178/182 from emitting two highs in a
-  row, and per-zone cooldown (`NOTIFY_COOLDOWN_SECONDS`, default
-  15 min). "Returned to range" events are deliberately omitted —
-  they get noisy fast.
-- **Staleness alarms** after `NOTIFY_STALE_AFTER_SECONDS` (default
-  10 min), with its own 30-min cooldown, using the
-  daemon-reported `reading_age_seconds` so frontend/daemon clock
-  skew doesn't matter.
-
-`MacOSNotificationBackend` tries `rumps.notification` first (needs
-`CFBundleIdentifier`), falls back to `osascript display
-notification`. Either path works from a LaunchAgent.
-
 ### Dialogs — two-mode UX
 
-Credential and threshold prompts split by runtime mode, controlled
+Credential prompts split by runtime mode, controlled
 by `_is_bundled()`:
 
 - **Bundled** (launched from `Glucose Menubar.app` under launchd):
@@ -302,13 +282,13 @@ for "run this on main, wait for it, return its value".
 
 ### Menu actions
 
+The dropdown is built in `GlucoseApp.__init__`: status rows, optional
+detail row (hidden when empty), embedded graph view, then actions.
+
 | Item                       | Behaviour                                                                 |
 | -------------------------- | ------------------------------------------------------------------------- |
-| Refresh Now                | Call `_on_tick(None)` immediately.                                        |
-| Force Re-Authenticate      | `POST /auth/refresh`, then tick.                                          |
-| Notifications              | Toggle `Notifier.enabled`. Session-only unless `NOTIFY_ENABLED` is set.   |
-| Update Credentials…        | Native/osascript dialog → `save_credentials()` → Keychain.                |
-| Set Thresholds…            | Comma-separated input; updates `self.thresholds`, notifier, and graph.   |
+| Refresh Now                | `DaemonClient.force_refresh()` → `POST /auth/refresh` on the daemon, then `_on_tick(None)` (`_session_refresh_then_tick` in `app.py`) so LibreLinkUp is re-authenticated and the title / menu / graph refresh together. |
+| LibreLinkUp Account…       | Native `NSAlert` (bundled) or sequential `osascript` prompts (unbundled) → `save_credentials()` → Keychain. |
 | Quit                       | Standard rumps quit.                                                      |
 
 ## 5. Shared code (`glucose_common/`)
@@ -351,8 +331,9 @@ the frontend has very few knobs and they're all optional:
 
 - `DAEMON_URL`, `FRONTEND_POLL_SECONDS`
 - `THRESHOLD_LOW_MG_DL`, `THRESHOLD_HIGH_MG_DL`, `THRESHOLD_VERY_HIGH_MG_DL`
-- `NOTIFY_ENABLED`, `NOTIFY_COOLDOWN_SECONDS`,
-  `NOTIFY_STALE_AFTER_SECONDS`
+
+(`README.md` also lists `NOTIFY_*` variables; nothing in the current
+`daemon/` or `macos_frontend/` tree reads them yet.)
 
 ## 7. Testing (`tests/`)
 
@@ -362,9 +343,6 @@ Unit tests (pytest) cover the pieces that benefit most:
   (`seed_for_tests`).
 - `test_credentials.py` — fake `KeyringLike`, verifies precedence
   and the "never mix sources" rule.
-- `test_notifier.py` — injected fake clock through
-  `NotificationPolicy._now`, exercises hysteresis + cooldowns +
-  stale alarm.
 - `test_service_state.py` — stubs `pylibrelinkup` with hand-built
   fake responses to cover warm-up, stale, fresh, and error paths.
 - `test_session_store.py` — round-trip + atomic-write behaviour.
@@ -384,8 +362,7 @@ there isn't much logic to cover.
 4. `DaemonClient.current()` → HTTP GET `/glucose/current` →
    FastAPI handler → `_service.snapshot()` → `CurrentResponse`.
 5. Frontend formats the title (integer + arrow), colours it through
-   an `NSAttributedString`, updates the "Updated" row, feeds the
-   reading to `Notifier.handle(...)`.
+   an `NSAttributedString`, and updates the status menu rows.
 6. `DaemonClient.graph(hours=8)` → `/glucose/graph` → the same
    snapshot's `history` list, filtered to the last 8 hours →
    `GlucoseGraphView.setPoints_(...)` → `setNeedsDisplay:` →
@@ -395,8 +372,10 @@ That's the whole loop.
 
 ## 9. Failure modes worth knowing
 
-- **Daemon down, frontend up** → menubar shows `⚠ Daemon Offline`.
-  launchd should restart the daemon; no action required.
+- **Daemon down, frontend up** → menubar shows `⚠ Not Connected`.
+  launchd should restart the daemon; opening the menu triggers an
+  immediate retry (`showGlucoseMenu_` → `_on_tick`); otherwise wait
+  for the next `FRONTEND_POLL_SECONDS` tick.
 - **Network down** → daemon flips to `no_network`, the frontend
   shows `⚠ Offline`, and the error backoff escalates from 10s to
   300s (default cap).
@@ -423,6 +402,5 @@ The plan explicitly excludes:
 - Codesigning or notarization of `Glucose Menubar.app`.
 - A Linux port (the frontend is AppKit-only; the daemon would
   port, but there's no menubar host on the other side).
-- Persisting menu-driven threshold changes across restarts — the
-  Set Thresholds… dialog is session-only by design, `.env` is the
-  durable knob.
+- Menu-driven threshold editing — colours and graph bands use
+  `THRESHOLD_*_MG_DL` from the environment only.

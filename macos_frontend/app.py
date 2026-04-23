@@ -517,7 +517,7 @@ _DETAIL_TEXT = {
     "warming_up": "Try Again in a Few Minutes",
     "sensor_ended": "Replace Sensor in FreeStyle LibreLink",
     "no_network": "Check Wi-Fi and Try Refresh Now",
-    "auth_failed": "Choose “Refresh LibreLinkUp Session” below",
+    "auth_failed": "Choose “Refresh Now” below",
     "tos_required": "Finish any prompts in FreeStyle LibreLink",
     "rate_limited": "Retrying automatically",
 }
@@ -552,6 +552,13 @@ class _StatusItemMenuPresenter(NSObject):
         button = sender
         ns_menu.sizeToFit()
         menu_w = float(ns_menu.size().width)
+        # Stretch the graph row to the menu width so bands/line match separator
+        # lines (the view was created at a fixed width before final sizeToFit).
+        gv = app._graph_view
+        if abs(float(gv.frame().size.width) - menu_w) > 0.5:
+            gv.setFrame_(NSMakeRect(0, 0, menu_w, _GRAPH_HEIGHT))
+            ns_menu.sizeToFit()
+            menu_w = float(ns_menu.size().width)
         x = _MENU_POPUP_X_NUDGE_PT
         bw = float(button.bounds().size.width)
         if menu_w <= bw:
@@ -577,9 +584,6 @@ class GlucoseApp(rumps.App):
         self._detail_item = rumps.MenuItem("")
         self._daemon_unreachable = False
         self._refresh_item = rumps.MenuItem("Refresh Now", callback=self._on_refresh)
-        self._reauth_item = rumps.MenuItem(
-            "Refresh LibreLinkUp Session", callback=self._on_reauth
-        )
         self._creds_item = rumps.MenuItem(
             "LibreLinkUp Account…", callback=self._on_edit_credentials
         )
@@ -603,7 +607,6 @@ class GlucoseApp(rumps.App):
             self._graph_item,
             None,
             self._refresh_item,
-            self._reauth_item,
             None,
             self._creds_item,
         ]
@@ -896,12 +899,7 @@ class GlucoseApp(rumps.App):
         self._on_tick(None)
 
     def _on_refresh(self, _sender) -> None:
-        # Same backend path as “Refresh LibreLinkUp Session” so one click
-        # re-authenticates against Abbott and immediately updates the UI.
         self._session_refresh_then_tick(log_label="Refresh Now")
-
-    def _on_reauth(self, _sender) -> None:
-        self._session_refresh_then_tick(log_label="Refresh LibreLinkUp Session")
 
     def _on_edit_credentials(self, _sender) -> None:
         log.info("Update credentials clicked")
@@ -962,7 +960,7 @@ class GlucoseApp(rumps.App):
             title="Sign-in saved",
             message=(
                 "Saved to your Mac Keychain. "
-                "Choose “Refresh LibreLinkUp Session” from the menu to connect with these details now."
+                "Choose “Refresh Now” from the menu to connect with these details now."
             ),
         )
 
