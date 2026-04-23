@@ -218,13 +218,20 @@ class GlucoseGraphView(NSView):
         path.setLineWidth_(_LINE_WIDTH)
         # Round joins keep direction changes from looking jagged at this size.
         path.setLineJoinStyle_(1)  # NSLineJoinStyleRound
+        left_x = plot.origin.x
         first = True
         for ts_s, value in self._points:
             x = self._x_for(plot, ts_s, now_s)
             y = self._y_for(plot, value)
             point = NSMakePoint(x, y)
             if first:
-                path.moveToPoint_(point)
+                # Oldest sample may be newer than "-{hours}h"; without a lead-in the
+                # trace would start inset while "Now" still hugs the right edge.
+                if x > left_x + 0.5:
+                    path.moveToPoint_(NSMakePoint(left_x, y))
+                    path.lineToPoint_(point)
+                else:
+                    path.moveToPoint_(point)
                 first = False
             else:
                 path.lineToPoint_(point)

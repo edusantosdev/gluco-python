@@ -538,7 +538,7 @@ class _StatusItemMenuPresenter(NSObject):
         # waiting for the next periodic tick.
         if getattr(app, "_daemon_unreachable", False):
             app._on_tick(None)
-        # Recompute the "Refresh (… ago)" label and its enabled state
+        # Recompute the refresh row label and its enabled state
         # against the wall clock at open time, otherwise both would only
         # advance once per ``poll_interval`` and the row could read e.g.
         # "(Just now)" while disabled long after the reading went stale.
@@ -578,7 +578,7 @@ class GlucoseApp(rumps.App):
         self._daemon_unreachable = False
         self._refresh_item = rumps.MenuItem("Refresh", callback=self._on_refresh)
         # Latest sensor timestamp (UTC datetime) used to recompute the
-        # "Refresh (… ago)" label live when the menu opens, instead
+        # refresh row label live when the menu opens, instead
         # of relying on the daemon's pre-baked ``reading_age_seconds``
         # which only refreshes once per poll.
         self._last_sensor_dt: datetime | None = None
@@ -892,24 +892,27 @@ class GlucoseApp(rumps.App):
         return int(delta.total_seconds())
 
     def _update_refresh_item(self) -> None:
-        """Sync the ``Refresh`` row's label and enabled state to the live age.
+        """Sync the refresh row's label and enabled state to the live reading age.
 
-        The button is held disabled while the most recent reading is
-        younger than one minute — the LibreLinkUp backend pushes a new
-        sample roughly once a minute, so a refresh inside that window
-        can't return anything new and would just hammer the API.
+        While the sensor reading is under one minute old, the row reads
+        ``Updated now`` and stays disabled — LibreLinkUp samples about
+        once a minute, so an earlier refresh would only hammer the API.
+        Once the reading is a minute old or more, the label becomes
+        ``Refresh (Last updated …)`` and the action is enabled again.
         """
         age = self._current_reading_age_seconds()
-        if age is not None and age >= 0:
-            self._refresh_item.title = f"Refresh ({_humanize_age(age)})"
-        else:
-            self._refresh_item.title = "Refresh"
-        if age is None or age >= 60:
-            if self._refresh_item.callback is not self._on_refresh:
-                self._refresh_item.set_callback(self._on_refresh)
-        else:
+        if age is not None and age < 60:
+            self._refresh_item.title = "Updated now"
             if self._refresh_item.callback is not None:
                 self._refresh_item.set_callback(None)
+            return
+
+        if age is not None and age >= 60:
+            self._refresh_item.title = f"Refresh (Last updated {_humanize_age(age)})"
+        else:
+            self._refresh_item.title = "Refresh"
+        if self._refresh_item.callback is not self._on_refresh:
+            self._refresh_item.set_callback(self._on_refresh)
 
     def _session_refresh_then_tick(self, *, log_label: str) -> None:
         """POST /auth/refresh on the daemon, then pull current reading + graph."""
