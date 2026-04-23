@@ -114,15 +114,15 @@ scripts/install_launchagent.sh status
 scripts/install_launchagent.sh logs
 ```
 
-## Run Without the LaunchAgent
+## Run Without Auto-start
 
-Skip `install_launchagent.sh` and start the menubar manually — nothing
-is registered with `launchd`, so nothing auto-starts at login. The
-menubar still supervises the daemon automatically, so one command is
-enough:
+Use the app bundle directly without enabling login auto-start. The
+menubar still supervises the daemon automatically:
 
 ```bash
-.venv/bin/python -m macos_frontend
+scripts/install_launchagent.sh install
+scripts/install_launchagent.sh disable
+open build/Glucobar.app
 ```
 
 Quitting the menubar (⌘Q or **Quit**) SIGTERMs the supervised daemon.
@@ -135,7 +135,7 @@ first, then start the menubar — the menubar probes
 
 ```bash
 .venv/bin/python -m daemon            # terminal 1
-.venv/bin/python -m macos_frontend    # terminal 2 — detects terminal 1
+open build/Glucobar.app               # terminal 2 — detects terminal 1
 ```
 
 The supervisor is always wired up in the frontend — there is no
@@ -192,7 +192,7 @@ scripts/package_release_artifact.sh --version v0.3.0 --repo your-org/glucobar
 
 `scripts/install_launchagent.sh install` re-applies the frontend LaunchAgent plist, rebuilds `build/Glucobar.app` when needed, and restarts the menubar (which respawns its supervised daemon child) — use it after code or `.env` changes, or after recreating the venv. It also sweeps any legacy LaunchAgents (`com.glucobar.daemon`, `com.glucose-display.*`) left behind by older installs so two daemons can never race the same LibreView session.
 
-`scripts/install_launchagent.sh uninstall` unregisters the LaunchAgent so `launchd` stops auto-starting the menubar, removes the plist file from `~/Library/LaunchAgents/`, and leaves you to start `python -m macos_frontend` yourself (which still supervises its daemon) — or to run `install` again when you want `launchd` to manage it.
+`scripts/install_launchagent.sh uninstall` unregisters the LaunchAgent so `launchd` stops auto-starting the menubar and removes the plist file from `~/Library/LaunchAgents/`. Launch the app manually with `open build/Glucobar.app` if you still want to run it in the current session.
 
 ```bash
 scripts/install_launchagent.sh install
@@ -260,13 +260,9 @@ See `.env.example` for the full list.
   `.env` fallback for email or password — if the Keychain is empty
   the menubar prompts on next launch.
 - **The credentials dialog**: a single window with stacked email +
-  password fields. In bundled mode (`install_launchagent.sh
-  install`) it's a native `NSPanel`; in terminal mode (`python -m
-  macos_frontend`) it falls back to two sequential AppleScript
-  prompts because AppKit modals don't survive in an unbundled
-  Python process. Same code path for both first-launch onboarding
-  and the **LibreView Account** menu item — onboarding just swaps
-  the window copy.
+  password fields shown in a native `NSPanel`. Same code path for
+  both first-launch onboarding and the **LibreView Account** menu
+  item — onboarding just swaps the window copy.
 - **After you save**: the menubar writes the Keychain entries and
   asks the supervised daemon to restart so it re-authenticates
   immediately with the new credentials.
@@ -327,7 +323,7 @@ Glucobar used to be called `glucose-display`. If you're upgrading:
 - **"Another glucose daemon is already running"**: the supervisor detected another daemon holding `~/.glucobar/daemon.lock`. Quit the other one (e.g. a stray `python -m daemon` in another terminal), then relaunch the menubar.
 - **Menubar keeps restarting**: `scripts/install_launchagent.sh logs` and inspect frontend errors.
 - **Daemon exits immediately with "No LibreView credentials found"**: open the menubar app once so the first-run prompt can seed the Keychain, or run `scripts/set_credentials.py`.
-- **Credential dialog looks like an AppleScript prompt in terminal mode**: expected — unbundled runs fall back to `osascript` so modals don't tear the Python process down. Use `scripts/install_launchagent.sh install` for the native `NSPanel` UI.
+- **Frontend exits immediately when launched from terminal**: expected — direct `python -m macos_frontend` runs are unsupported. Launch via `open build/Glucobar.app` or `scripts/install_launchagent.sh install`.
 - **Rebuilt `.venv` or upgraded Python**: rerun `scripts/install_launchagent.sh install` to rebuild the wrapper app symlinks.
 
 ## Development
@@ -347,7 +343,7 @@ progress toward a downloadable build:
 - [x] `py2app` config producing a standalone `Glucobar.app`
 - [ ] App icon (`resources/Glucobar.icns`)
 - [x] Onboarding / preferences window for first-launch credential entry
-- [ ] GitHub Actions release workflow (build → ad-hoc sign → zip/dmg → upload)
+- [x] GitHub Actions release workflow (build + test + zip + upload release assets)
 - [ ] Homebrew Cask tap
 - [ ] (Stretch) Developer ID signing + notarization
 

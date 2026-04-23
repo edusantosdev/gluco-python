@@ -8,7 +8,7 @@ them update the stored credentials later.
 
 Run::
 
-    .venv/bin/python -m macos_frontend
+    scripts/install_launchagent.sh install
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ from AppKit import (
 from dotenv import load_dotenv
 from Foundation import NSBundle, NSMinY, NSObject, NSPoint
 
-# Allow ``python -m macos_frontend`` and ``python macos_frontend/app.py``.
+# Keep repo root importable when launched from the app wrapper.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
@@ -117,8 +117,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("glucose.frontend")
 
-# Dialog strategy: native ``NSPanel`` modals when bundled, osascript
-# fallback otherwise.
+# Dialog strategy: native ``NSPanel`` modals only.
 #
 # When launched from launchd via the ``Glucobar.app`` wrapper bundle
 # (see ``scripts/app_bundle/``), AppKit sees a real
@@ -130,101 +129,11 @@ log = logging.getLogger("glucose.frontend")
 # paints the generic Python launcher glyph until we ship a real
 # ``Glucobar.icns``.
 #
-# When running unbundled (e.g. ``python -m macos_frontend`` from a
-# terminal during development), the Python process has no bundle
-# identity. Several AppKit UI APIs refuse to work in that context —
-# ``runModalForWindow_`` / ``rumps.Window.run`` behave similarly:
-# the call appears to start, but AppKit silently marks the process
-# as misbehaving and ``launchd`` tears it down a few seconds later.
-# There's no crash report, just a clean exit and a relaunch — which
-# from the user's perspective looks like "the menu went dead and
-# nothing happened". In that mode we fall back to ``osascript``,
-# which shells out to a properly bundled helper process (``System
-# Events``) to host the dialog.
-#
-# Either way, the dialog flow runs on a background thread so the
+# Dialog flow runs on a background thread so the
 # rumps menu callback returns immediately (otherwise the menu stays
-# wedged in its tracking session). The native path uses
+# wedged in its tracking session). We use
 # ``performSelectorOnMainThread:`` to marshal the actual UI call back
 # to the main thread.
-
-
-def _applescript_escape(s: str) -> str:
-    return s.replace("\\", "\\\\").replace('"', '\\"')
-
-
-def _osascript_dialog(
-    *,
-    title: str,
-    message: str,
-    default_text: str = "",
-    ok: str = "OK",
-    cancel: str = "Cancel",
-    hidden_answer: bool = False,
-) -> tuple[bool, str]:
-    """Show a text-input dialog. Returns ``(clicked_ok, text)``.
-
-    On cancel / close / error, returns ``(False, "")``.
-    """
-    parts = [
-        f'display dialog "{_applescript_escape(message)}"',
-        f'default answer "{_applescript_escape(default_text)}"',
-        f'with title "{_applescript_escape(title)}"',
-        f'buttons {{"{_applescript_escape(cancel)}", "{_applescript_escape(ok)}"}}',
-        f'default button "{_applescript_escape(ok)}"',
-        f'cancel button "{_applescript_escape(cancel)}"',
-    ]
-    if hidden_answer:
-        parts.append("with hidden answer")
-    # Run ``display dialog`` directly (no ``tell application "System Events"``
-    # wrapper). The SE wrapper isn't needed here — osascript itself is a
-    # proper bundled helper — and empirically it can interfere with the
-    # second invocation from the same process (the hidden-answer password
-    # prompt never appears). Using ``tell me to activate`` brings
-    # osascript's own dialog to the front.
-    script = "tell me to activate\n" + " ".join(parts)
-    log.info("osascript dialog: title=%r hidden=%s", title, hidden_answer)
-    proc = subprocess.run(
-        ["/usr/bin/osascript", "-e", script],
-        capture_output=True,
-        text=True,
-        timeout=600,
-    )
-    if proc.returncode != 0:
-        stderr = (proc.stderr or "").strip()
-        # Exit 1 + "-128" = user hit Cancel / closed the dialog.
-        if "-128" in stderr or "User canceled" in stderr:
-            log.info("osascript dialog %r: cancelled", title)
-            return False, ""
-        log.warning("osascript dialog %r failed (rc=%s): %s",
-                    title, proc.returncode, stderr)
-        return False, ""
-    out = (proc.stdout or "").strip()
-    # Format: "button returned:<ok>, text returned:<value>".
-    text = ""
-    marker = "text returned:"
-    if marker in out:
-        text = out[out.index(marker) + len(marker):].strip()
-    log.info("osascript dialog %r: ok, text_len=%d", title, len(text))
-    return True, text
-
-
-def _osascript_alert(*, title: str, message: str) -> None:
-    """Show a one-button informational alert. Errors are logged, not raised."""
-    script = (
-        "tell me to activate\n"
-        f'display alert "{_applescript_escape(title)}" '
-        f'message "{_applescript_escape(message)}"'
-    )
-    try:
-        subprocess.run(
-            ["/usr/bin/osascript", "-e", script],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-    except Exception:  # noqa: BLE001
-        log.exception("osascript alert failed")
 
 
 def _run_in_background(fn) -> None:
@@ -247,9 +156,7 @@ def _run_in_background(fn) -> None:
 #
 # When launched via the ``Glucobar.app`` wrapper bundle, AppKit sees a real
 # ``CFBundleIdentifier`` and ``NSPanel`` modals work correctly.
-# When launched directly (``python -m macos_frontend`` during development),
-# the same calls can silently tear down the process — so we fall back to
-# the osascript two-dialog flow.
+# Any non-bundled launch is unsupported and rejected at startup.
 
 _BUNDLE_ID = "com.glucobar.frontend"
 
@@ -262,13 +169,26 @@ def _is_bundled() -> bool:
     return bid == _BUNDLE_ID
 
 
+def _ensure_bundled_launch() -> None:
+    """Fail fast when launched outside ``Glucobar.app``.
+
+    Native AppKit modal flows depend on a real bundle identity; running
+    this module directly is intentionally unsupported.
+    """
+    if _is_bundled():
+        return
+    raise RuntimeError(
+        "Unsupported launch mode. Start Glucobar from Glucobar.app "
+        "(e.g. run scripts/install_launchagent.sh install)."
+    )
+
+
 def _hide_dock_icon_by_default() -> None:
-    """Prefer menu-bar-only activation policy on every launch mode.
+    """Prefer menu-bar-only activation policy.
 
     Bundled launches already have ``LSUIElement=true`` in ``Info.plist``,
-    but unbundled development launches (``python -m macos_frontend``)
-    would otherwise show a Dock icon. Setting Accessory keeps behaviour
-    consistent: menu bar item only, no Dock entry by default.
+    but setting Accessory keeps behavior explicit: menu bar item only, no
+    Dock entry by default.
     """
     try:
         NSApplication.sharedApplication().setActivationPolicy_(
@@ -1474,29 +1394,19 @@ class GlucoseApp(rumps.App):
     def _edit_credentials_impl(self) -> None:
         """Capture email + password and save to Keychain.
 
-        When running inside the ``Glucobar.app`` wrapper bundle we show
-        a single native ``NSPanel`` with two fields. When running
-        unbundled (``python -m macos_frontend`` during development),
-        AppKit modals can tear the process down, so we fall back to
-        the osascript two-dialog flow which delegates UI to a properly
-        bundled helper process.
+        Uses a single native ``NSPanel`` with two fields.
         """
         pref_email, pref_password = _credentials_dialog_prefill()
         while True:
-            if _is_bundled():
-                ok, email, password = _run_on_main_and_wait(
-                    lambda: _native_credentials_dialog(
-                        current_email=pref_email,
-                        current_password=pref_password,
-                        title=_SIGN_IN_DIALOG_TITLE,
-                        body_text=_SIGN_IN_DIALOG_BODY,
-                        save_button=_SIGN_IN_DIALOG_BUTTON,
-                    )
+            ok, email, password = _run_on_main_and_wait(
+                lambda: _native_credentials_dialog(
+                    current_email=pref_email,
+                    current_password=pref_password,
+                    title=_SIGN_IN_DIALOG_TITLE,
+                    body_text=_SIGN_IN_DIALOG_BODY,
+                    save_button=_SIGN_IN_DIALOG_BUTTON,
                 )
-            else:
-                ok, email, password = self._osascript_credentials_prompt(
-                    default_email=pref_email,
-                )
+            )
             if not ok:
                 return
 
@@ -1553,49 +1463,22 @@ class GlucoseApp(rumps.App):
             )
             return
 
-    def _osascript_credentials_prompt(
-        self, *, default_email: str = ""
-    ) -> tuple[bool, str, str]:
-        """Unbundled-mode fallback: two sequential osascript dialogs."""
-        ok, email = _osascript_dialog(
-            title="LibreView email",
-            message="Enter the email you use for LibreView.",
-            default_text=default_email,
-            ok="Next",
-        )
-        if not ok:
-            return False, "", ""
-        ok, password = _osascript_dialog(
-            title="LibreView password",
-            message="This is saved in your Mac Keychain.",
-            ok="Save",
-            hidden_answer=True,
-        )
-        if not ok:
-            return False, "", ""
-        return True, email, password
-
     def _show_alert(self, *, title: str, message: str) -> None:
-        """Show an informational alert, using whichever backend fits the mode.
+        """Show an informational alert via native ``NSPanel``.
 
-        Bundled mode uses :func:`_native_info_alert` (an ``NSPanel``)
+        Uses :func:`_native_info_alert` (an ``NSPanel``)
         instead of ``NSAlert`` so we don't paint the generic Python
         launcher icon next to every message until we ship a real
-        ``Glucobar.icns``. Unbundled runs still fall back to
-        ``osascript`` — the developer loop doesn't depend on the
-        icon, and ``osascript`` is the most reliable cross-runloop
-        dialog when we're not inside a real ``.app``.
+        ``Glucobar.icns``.
         """
-        if _is_bundled():
-            _run_on_main_and_wait(
-                lambda: _native_info_alert(title=title, message=message)
-            )
-        else:
-            _osascript_alert(title=title, message=message)
+        _run_on_main_and_wait(
+            lambda: _native_info_alert(title=title, message=message)
+        )
 
 
 def main() -> int:
     load_dotenv(_REPO_ROOT / ".env")
+    _ensure_bundled_launch()
     _hide_dock_icon_by_default()
     base_url = os.environ.get("DAEMON_URL", "http://127.0.0.1:8765")
     poll_interval = int(os.environ.get("FRONTEND_POLL_SECONDS", "30"))

@@ -39,20 +39,35 @@ Outputs:
 - `release/Glucobar-v0.3.0-macos.zip.sha256`
 - `release/homebrew-cask-snippet.rb`
 
-## 3) Create GitHub tag + release
+## 3) Create GitHub tag (workflow publishes release assets)
 
-Create/push the tag and publish the release:
+Create and push the tag:
 
 ```bash
 git tag v0.3.0
 git push origin v0.3.0
+```
+
+This triggers `.github/workflows/release.yml`, which:
+
+- installs deps (`.[dev,build]`)
+- runs tests
+- builds `dist/Glucobar.app`
+- packages `release/Glucobar-vX.Y.Z-macos.zip` + `.sha256`
+- uploads assets to the GitHub release for that tag
+
+After the workflow completes, verify assets are present in the release page.
+
+If you need a manual fallback, you can still run:
+
+```bash
 gh release create v0.3.0 \
   "release/Glucobar-v0.3.0-macos.zip" \
   --title "v0.3.0" \
   --notes "Release notes here."
 ```
 
-The cask URL must match this pattern exactly:
+The cask URL must match this pattern:
 
 - `https://github.com/eduardo/librelinkup-glucose-menubar-python/releases/download/v0.3.0/Glucobar-v0.3.0-macos.zip`
 
