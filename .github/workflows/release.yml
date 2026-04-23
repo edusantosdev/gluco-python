@@ -51,6 +51,12 @@ jobs:
           set -euo pipefail
           .venv/bin/python -m pytest tests/
 
+      - name: Run lint
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m ruff check .
+
       - name: Build standalone app
         shell: bash
         run: |

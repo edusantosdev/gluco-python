@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 
 
-class Status(str, Enum):
+class Status(StrEnum):
     """Discriminated states the frontend can rely on without parsing strings.
 
     Inheriting from ``str`` makes the enum JSON-serialisable as the value

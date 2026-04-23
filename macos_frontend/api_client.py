@@ -7,6 +7,7 @@ directly, and it should never need anything more than what's exposed here.
 from __future__ import annotations
 
 import errno
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -85,13 +86,16 @@ class CurrentReading:
 class DaemonClient:
     def __init__(self, base_url: str = "http://127.0.0.1:8765", timeout: float = 5.0):
         self._client = httpx.Client(base_url=base_url, timeout=timeout)
+        self._lock = threading.Lock()
 
     def close(self) -> None:
-        self._client.close()
+        with self._lock:
+            self._client.close()
 
     def current(self) -> CurrentReading:
         try:
-            resp = self._client.get("/glucose/current")
+            with self._lock:
+                resp = self._client.get("/glucose/current")
         except httpx.HTTPError as e:
             if _transport_is_daemon_socket_not_ready(e):
                 raise DaemonNotReady(str(e)) from e
@@ -115,7 +119,8 @@ class DaemonClient:
         return CurrentReading.from_payload(resp.json())
 
     def force_refresh(self) -> dict[str, Any]:
-        resp = self._client.post("/auth/refresh")
+        with self._lock:
+            resp = self._client.post("/auth/refresh")
         resp.raise_for_status()
         return resp.json()
 
@@ -128,7 +133,8 @@ class DaemonClient:
         contract.
         """
         try:
-            resp = self._client.get("/glucose/graph", params={"hours": hours})
+            with self._lock:
+                resp = self._client.get("/glucose/graph", params={"hours": hours})
         except httpx.HTTPError as e:
             if _transport_is_daemon_socket_not_ready(e):
                 raise DaemonNotReady(str(e)) from e

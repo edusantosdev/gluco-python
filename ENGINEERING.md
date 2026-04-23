@@ -8,8 +8,8 @@ full design journal (decisions, trade-offs, phased rollout), see
 ## 1. What the app does
 
 The app shows the current LibreView glucose reading (value + trend arrow)
-in the macOS menubar, plus a small history graph and threshold-based
-notifications. It authenticates against Abbott's LibreView cloud via
+in the macOS menubar, plus a small history graph. It authenticates
+against Abbott's LibreView cloud via
 `pylibrelinkup`, polls for readings, and surfaces them locally.
 
 The design is deliberately **personal-tool-grade**: everything runs on
@@ -191,7 +191,8 @@ encoder:
 - `stale` — last reading older than `STALE_AFTER_SECONDS`.
 - `warming_up` — sensor activated but still inside its 60-minute
   warm-up (`sensor.a + sensor.w*60 > now`).
-- `sensor_ended` — sensor expired.
+- `sensor_ended` — reserved status for future sensor-expiry handling
+  (currently declared in the enum but not emitted by poll logic).
 - `no_network` — transport errors; the daemon is backing off.
 - `auth_failed` — credentials rejected.
 - `tos_required` — Terms / Privacy Policy acceptance required on the
@@ -265,9 +266,9 @@ fd isn't GC'd; kernel releases it on process exit.
 
 ### HTTP API
 
-All endpoints read from the lock-guarded snapshot. No endpoint makes
-an outbound Abbott call — `/auth/refresh` does, but only to the same
-service method the poller uses, running on the caller's thread.
+All endpoints read from lock-guarded state. `/auth/refresh` reuses the
+same service method as the poller and runs it in a threadpool so FastAPI's
+event loop isn't blocked during the outbound LibreView call.
 
 | Method | Path                | Purpose                                             |
 | ------ | ------------------- | --------------------------------------------------- |
@@ -443,7 +444,7 @@ State lives under `DAEMON_STATE_DIR` (default
 ├── daemon.stdout.log       # supervised child stdio (append)
 ├── daemon.stderr.log       # supervised child stdio (append)
 ├── launchd.frontend.*.log  # launchd's capture of the menubar process
-└── logs/daemon.log*        # RotatingFileHandler (1 MB × 5)
+└── daemon.log(.1..3)       # RotatingFileHandler (1 MB × 3 backups)
 ```
 
 Frontend settings are plain `os.environ` reads — no pydantic, because

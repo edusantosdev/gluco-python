@@ -18,9 +18,9 @@ actual ``drawRect:`` always runs on the main thread the next runloop pass.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
-import logging
 
 import objc
 from AppKit import (

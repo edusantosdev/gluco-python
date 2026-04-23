@@ -150,10 +150,10 @@ same trick makes `NSPanel.runModalForWindow_` actually work; direct
 terminal launches are intentionally unsupported, and the frontend now
 fails fast outside `Glucobar.app`.
 
-A real `py2app` build producing a redistributable `Glucobar.app` is
-on the packaging roadmap in `README.md` but not shipped yet.
+A `py2app` build now ships as part of the release workflow and local
+packaging scripts.
 
-**Dev tooling:** `uv` for env management, `ruff` for lint + format,
+**Dev tooling:** `venv` + `pip` for environment management, `ruff` for lint,
 `pytest` for tests. All boring, all intentional.
 
 ---
@@ -167,7 +167,8 @@ concerns could wait one phase.
 
 ### Phase 0 — Verify the API (done)
 
-`scripts/phase0_probe.py` still exists: loads `.env`, authenticates,
+`scripts/phase0_probe.py` still exists: loads non-credential env defaults,
+authenticates with Keychain credentials,
 fetches the first patient's latest reading, prints JSON. Run it
 before reporting "Glucobar doesn't work" — it isolates account /
 region / ToS problems from everything else.
@@ -244,7 +245,7 @@ The failure modes that only reveal themselves over days of real use:
   the poller; supervisor SIGTERMs the child's process group on
   Quit; parent-death pipe catches everything else.
 - **Structured logging.** `RotatingFileHandler` at
-  `~/.glucobar/logs/daemon.log` (1 MB × 5). A daemon that runs for
+  `~/.glucobar/daemon.log` (1 MB × 3 backups). A daemon that runs for
   months without logs is un-debuggable; a daemon that grows an
   unbounded log is a different kind of broken.
 
@@ -307,16 +308,13 @@ half present, the other missing) is treated as absent so silent
 mis-merging can't hide bugs. Non-credential knobs still come from
 `.env` / `os.environ`:
 
-- `LIBREVIEW_REGION` (required) — cluster (`US`, `EU`, `EU2`, …) or
+- `LIBREVIEW_REGION` (optional) — cluster (`US`, `EU`, `EU2`, …) or
   a country-code alias that maps to one (`PT` / `ES` / `GB` → `EU`).
 - `POLL_INTERVAL_SECONDS`, `FRONTEND_POLL_SECONDS`,
   `STALE_AFTER_SECONDS`, `DAEMON_URL`.
 - `THRESHOLD_LOW_MG_DL`, `THRESHOLD_HIGH_MG_DL`,
   `THRESHOLD_VERY_HIGH_MG_DL`.
 - `DAEMON_STATE_DIR` (default `~/.glucobar/`), `LOG_LEVEL`.
-- `GLUCOBAR_SUPERVISE_DAEMON` (default on) — set `0` to disable the
-  frontend's supervisor for power-users running the daemon under
-  their own process manager.
 
 The full list with defaults lives in `.env.example`.
 
@@ -329,7 +327,7 @@ State lives under `~/.glucobar/`:
 ├── daemon.stdout.log       # supervised child stdio (append)
 ├── daemon.stderr.log       # supervised child stdio (append)
 ├── launchd.frontend.*.log  # launchd's capture of the menubar process
-└── logs/daemon.log*        # RotatingFileHandler (1 MB × 5)
+└── daemon.log(.1..3)       # RotatingFileHandler (1 MB × 3 backups)
 ```
 
 ---

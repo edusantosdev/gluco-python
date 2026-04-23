@@ -85,6 +85,9 @@ class GlucoseService:
 
         self._state = DaemonState()
         self._lock = threading.Lock()
+        # Serializes all access to ``self.client`` / ``self.patient`` so
+        # manual refreshes (HTTP thread) never race the poller thread.
+        self._client_lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -148,14 +151,27 @@ class GlucoseService:
 
         Used by ``POST /auth/refresh``. Runs on the caller's thread so the
         HTTP response reflects the new state."""
-        self._clear_session()
-        self._authenticate_once(force=True)
-        if self.patient is not None:
-            try:
-                self._poll_once()
-            except Exception as e:  # noqa: BLE001
-                self._handle_poll_error(e)
+        with self._client_lock:
+            self._clear_session()
+            self._authenticate_once(force=True)
+            if self.patient is not None:
+                try:
+                    self._poll_once()
+                except Exception as e:  # noqa: BLE001
+                    self._handle_poll_error(e)
         return self.snapshot()
+
+    def patient_snapshot(self) -> tuple[str, str, str | None] | None:
+        """Return immutable patient identity fields, if known."""
+        with self._client_lock:
+            if self.patient is None:
+                return None
+            p = self.patient
+            return (
+                str(getattr(p, "first_name", "") or ""),
+                str(getattr(p, "last_name", "") or ""),
+                str(getattr(p, "patient_id", "") or "") or None,
+            )
 
     # --- internals: state mutation ---
 
@@ -280,56 +296,57 @@ class GlucoseService:
 
     def _tick(self) -> float:
         """One iteration of the poll loop. Returns seconds to sleep."""
-        snap_status = self.snapshot().status
+        with self._client_lock:
+            snap_status = self.snapshot().status
 
-        if snap_status == Status.TOS_REQUIRED:
-            # Don't hammer Abbott while waiting for the user to click accept.
-            # Re-attempting quietly every 5 minutes lets us recover automatically
-            # once the user has resolved it on their phone.
-            if not self._authenticate_once():
-                return _BACKOFF_ON_TOS_SECONDS
+            if snap_status == Status.TOS_REQUIRED:
+                # Don't hammer Abbott while waiting for the user to click accept.
+                # Re-attempting quietly every 5 minutes lets us recover automatically
+                # once the user has resolved it on their phone.
+                if not self._authenticate_once():
+                    return _BACKOFF_ON_TOS_SECONDS
 
-        if self.patient is None:
-            if not self._authenticate_once():
+            if self.patient is None:
+                if not self._authenticate_once():
+                    return self._error_backoff.next_delay()
+
+            try:
+                self._poll_once()
+                self._error_backoff.reset()
+                self._ratelimit_backoff.reset()
+                return self.poll_interval
+            except AuthenticationError:
+                # JWT expired mid-session. Drop the cached one and try once more
+                # right now — if that also fails, fall through to normal backoff.
+                log.info("Auth expired; refreshing and retrying once")
+                self._clear_session()
+                if self._authenticate_once(force=True):
+                    try:
+                        self._poll_once()
+                        self._error_backoff.reset()
+                        return self.poll_interval
+                    except Exception as e:  # noqa: BLE001
+                        self._handle_poll_error(e)
                 return self._error_backoff.next_delay()
-
-        try:
-            self._poll_once()
-            self._error_backoff.reset()
-            self._ratelimit_backoff.reset()
-            return self.poll_interval
-        except AuthenticationError:
-            # JWT expired mid-session. Drop the cached one and try once more
-            # right now — if that also fails, fall through to normal backoff.
-            log.info("Auth expired; refreshing and retrying once")
-            self._clear_session()
-            if self._authenticate_once(force=True):
-                try:
-                    self._poll_once()
-                    self._error_backoff.reset()
-                    return self.poll_interval
-                except Exception as e:  # noqa: BLE001
-                    self._handle_poll_error(e)
-            return self._error_backoff.next_delay()
-        except LLUAPIRateLimitError as e:
-            retry = getattr(e, "retry_after", None)
-            # Trust the server hint when provided; fall back to our own
-            # escalating schedule so repeated 429s keep stretching.
-            delay = float(retry) if retry else self._ratelimit_backoff.next_delay()
-            self._set_state(
-                status=Status.RATE_LIMITED,
-                last_error=f"retry_after={retry or int(delay)}s",
-                bump_failures=True,
-            )
-            return delay
-        except (TermsOfUseError, PrivacyPolicyError) as e:
-            self._set_state(
-                status=Status.TOS_REQUIRED, last_error=str(e), bump_failures=True
-            )
-            return _BACKOFF_ON_TOS_SECONDS
-        except Exception as e:  # noqa: BLE001
-            self._handle_poll_error(e)
-            return self._error_backoff.next_delay()
+            except LLUAPIRateLimitError as e:
+                retry = getattr(e, "retry_after", None)
+                # Trust the server hint when provided; fall back to our own
+                # escalating schedule so repeated 429s keep stretching.
+                delay = float(retry) if retry else self._ratelimit_backoff.next_delay()
+                self._set_state(
+                    status=Status.RATE_LIMITED,
+                    last_error=f"retry_after={retry or int(delay)}s",
+                    bump_failures=True,
+                )
+                return delay
+            except (TermsOfUseError, PrivacyPolicyError) as e:
+                self._set_state(
+                    status=Status.TOS_REQUIRED, last_error=str(e), bump_failures=True
+                )
+                return _BACKOFF_ON_TOS_SECONDS
+            except Exception as e:  # noqa: BLE001
+                self._handle_poll_error(e)
+                return self._error_backoff.next_delay()
 
     def _poll_once(self) -> None:
         """Hit the ``/graph`` endpoint once and fold the result into state.

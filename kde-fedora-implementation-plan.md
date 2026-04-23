@@ -62,7 +62,7 @@ The current layout is already favorable for a Linux UI port:
 macOS-specific pieces are concentrated in:
 
 - `macos_frontend/app.py` (rumps + AppKit `NSPanel` modals,
-  osascript fallback, title pulse, status-menu alignment,
+  title pulse, status-menu alignment,
   first-run onboarding).
 - `macos_frontend/graph_view.py` (AppKit drawing).
 - `macos_frontend/api_client.py` (thin httpx wrapper around the

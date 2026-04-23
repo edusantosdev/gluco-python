@@ -32,7 +32,7 @@ class ExponentialBackoff:
     jitter: Literal["equal", "full", "none"] = "equal"
     _attempts: int = field(default=0, init=False, repr=False)
     # Injected for tests; defaults to module-level ``random.random``.
-    _rng: "random.Random" = field(default_factory=random.Random, init=False, repr=False)
+    _rng: random.Random = field(default_factory=random.Random, init=False, repr=False)
 
     def reset(self) -> None:
         self._attempts = 0

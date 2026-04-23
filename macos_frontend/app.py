@@ -22,20 +22,19 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import objc
 import rumps
-from rumps import events as rumps_events
 from AppKit import (
     NSApp,
     NSApplication,
     NSApplicationActivationPolicyAccessory,
-    NSAttributedString,
     NSBackingStoreBuffered,
     NSButton,
     NSColor,
+    NSEventModifierFlagCommand,
     NSFont,
     NSFontAttributeName,
     NSForegroundColorAttributeName,
@@ -43,7 +42,6 @@ from AppKit import (
     NSMakeRect,
     NSMutableAttributedString,
     NSPanel,
-    NSEventModifierFlagCommand,
     NSSecureTextField,
     NSTextField,
     NSView,
@@ -51,6 +49,7 @@ from AppKit import (
 )
 from dotenv import load_dotenv
 from Foundation import NSBundle, NSMinY, NSObject, NSPoint
+from rumps import events as rumps_events
 
 # Keep repo root importable when launched from the app wrapper.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -783,7 +782,7 @@ class _StatusItemMenuPresenter(NSObject):
     ``_MENU_POPUP_X_NUDGE_PT``.
     """
 
-    def initWithGlucoseApp_(self, app: "GlucoseApp"):
+    def initWithGlucoseApp_(self, app: GlucoseApp):
         self = objc.super(_StatusItemMenuPresenter, self).init()
         if self is None:
             return None
@@ -1196,7 +1195,7 @@ class GlucoseApp(rumps.App):
         """
         if self._last_sensor_dt is None:
             return None
-        delta = datetime.now(timezone.utc) - self._last_sensor_dt
+        delta = datetime.now(UTC) - self._last_sensor_dt
         return int(delta.total_seconds())
 
     def _update_refresh_item(self) -> None:
@@ -1252,11 +1251,11 @@ class GlucoseApp(rumps.App):
         # whenever the title says "Sign In", the menu row must also be a
         # sign-in/fix-account action (never sign out), even if a stale daemon
         # session still exists somewhere in the background.
-        needs_sign_in = (getattr(self, "_title_value", "") == "⚠ Sign In") or (not email) or self._last_daemon_status in {
-            "auth_failed",
-            "tos_required",
-            "logged_out",
-        }
+        needs_sign_in = (
+            (getattr(self, "_title_value", "") == "⚠ Sign In")
+            or (not email)
+            or self._last_daemon_status in {"auth_failed", "tos_required", "logged_out"}
+        )
         menu_item = self._creds_item._menuitem
         if needs_sign_in:
             primary = _SIGN_IN_MENU_PRIMARY_TITLE
@@ -1297,7 +1296,7 @@ class GlucoseApp(rumps.App):
             self._client.force_refresh()
         except Exception as e:  # noqa: BLE001
             log.warning("LibreView session refresh failed: %s", e)
-        self._on_tick(None)
+        _run_on_main_and_wait(lambda: self._on_tick(None))
 
     def _set_signing_in_state(self) -> None:
         """Render an explicit in-progress auth state in the menubar title."""
@@ -1378,8 +1377,8 @@ class GlucoseApp(rumps.App):
             return
         # Restart the daemon so any in-memory/disk session is dropped now.
         _kickstart_daemon()
-        self._on_tick(None)
-        self._update_credentials_item()
+        _run_on_main_and_wait(lambda: self._on_tick(None))
+        _run_on_main_and_wait(self._update_credentials_item)
         # Reuse the first-run onboarding dialog immediately after sign-out.
         self._first_run_credentials_impl()
 
@@ -1412,14 +1411,20 @@ class GlucoseApp(rumps.App):
         default_email = ""
         default_password = ""
         while True:
-            ok, email, password = _run_on_main_and_wait(
-                lambda: _native_credentials_dialog(
+            def _show_dialog(
+                default_email=default_email,
+                default_password=default_password,
+            ):
+                return _native_credentials_dialog(
                     current_email=default_email,
                     current_password=default_password,
                     title=_SIGN_IN_DIALOG_TITLE,
                     body_text=_SIGN_IN_DIALOG_BODY,
                     save_button=_SIGN_IN_DIALOG_BUTTON,
                 )
+
+            ok, email, password = _run_on_main_and_wait(
+                _show_dialog
             )
             if not ok:
                 log.info("First-run credentials prompt cancelled")
@@ -1449,8 +1454,8 @@ class GlucoseApp(rumps.App):
                 )
                 continue
             log.info("Saved LibreView credentials from first-run prompt")
-            self._update_credentials_item()
-            self._set_signing_in_state()
+            _run_on_main_and_wait(self._update_credentials_item)
+            _run_on_main_and_wait(self._set_signing_in_state)
             # Daemon is in the supervisor's sticky EX_CONFIG state; nudge
             # it so it respawns now with the new Keychain entry instead of
             # waiting for the user to poke the menu.
@@ -1460,7 +1465,7 @@ class GlucoseApp(rumps.App):
                 continue
             # Immediately repaint headline state so the menubar title
             # doesn't lag behind the success modal copy.
-            self._on_tick(None)
+            _run_on_main_and_wait(lambda: self._on_tick(None))
             self._show_alert(
                 title="You're signed in",
                 message=(
@@ -1497,7 +1502,7 @@ class GlucoseApp(rumps.App):
                     message=(proc.stderr or proc.stdout or "launchctl disable failed").strip(),
                 )
                 return
-            self._update_startup_item()
+            _run_on_main_and_wait(self._update_startup_item)
             return
 
         if not _FRONTEND_PLIST_PATH.exists():
@@ -1524,7 +1529,7 @@ class GlucoseApp(rumps.App):
                 message=(proc.stderr or proc.stdout or "launchctl enable failed").strip(),
             )
             return
-        self._update_startup_item()
+        _run_on_main_and_wait(self._update_startup_item)
 
     def _edit_credentials_impl(self) -> None:
         """Capture email + password and save to Keychain.
@@ -1533,14 +1538,20 @@ class GlucoseApp(rumps.App):
         """
         pref_email, pref_password = _credentials_dialog_prefill()
         while True:
-            ok, email, password = _run_on_main_and_wait(
-                lambda: _native_credentials_dialog(
+            def _show_dialog(
+                pref_email=pref_email,
+                pref_password=pref_password,
+            ):
+                return _native_credentials_dialog(
                     current_email=pref_email,
                     current_password=pref_password,
                     title=_SIGN_IN_DIALOG_TITLE,
                     body_text=_SIGN_IN_DIALOG_BODY,
                     save_button=_SIGN_IN_DIALOG_BUTTON,
                 )
+
+            ok, email, password = _run_on_main_and_wait(
+                _show_dialog
             )
             if not ok:
                 return
@@ -1574,8 +1585,8 @@ class GlucoseApp(rumps.App):
                     ),
                 )
                 continue
-            self._update_credentials_item()
-            self._set_signing_in_state()
+            _run_on_main_and_wait(self._update_credentials_item)
+            _run_on_main_and_wait(self._set_signing_in_state)
             # Kick the daemon so it re-authenticates with the new credentials
             # right away, instead of either waiting for its next poll (if
             # already running under the old creds) or for launchd's throttled
@@ -1585,7 +1596,7 @@ class GlucoseApp(rumps.App):
             if not self._handle_post_sign_in_status(status):
                 continue
             # Keep menu-bar state in sync with this success path.
-            self._on_tick(None)
+            _run_on_main_and_wait(lambda: self._on_tick(None))
             self._show_alert(
                 title="Sign-in saved",
                 message=(

@@ -70,8 +70,8 @@ resumes the stream — no action needed in Glucobar.
 Glucobar is currently distributed as source. A local standalone `.app`
 build is now available via `py2app` (see
 [Build a Standalone App (py2app)](#build-a-standalone-app-py2app)).
-Hosted downloadable releases are still on the roadmap (see
-[Packaging roadmap](#packaging-roadmap)).
+GitHub-hosted release artifacts are available via the release workflow
+(see [Packaging roadmap](#packaging-roadmap)).
 
 ```bash
 python3 -m venv .venv
@@ -221,6 +221,7 @@ and action buttons. Statuses collapse to these titles:
 | `starting` / `warming_up` / `rate_limited` / stale w/o value | `Connecting…`  |
 | `no_network` / daemon unreachable                      | `⚠ Offline`    |
 | `auth_failed` / `tos_required`                         | `⚠ Sign In`    |
+| `sensor_ended`                                          | `⚠ Error`      |
 | daemon 5xx / other unexpected failure                  | `⚠ Error`      |
 
 When the trend is directional (`↓ ↘ ↗ ↑`) the value + arrow gently pulse
@@ -258,7 +259,8 @@ read from env vars or `.env`.
 - `DAEMON_STATE_DIR` (default `~/.glucobar`)
 - `LOG_LEVEL` (default `INFO`)
 
-See `.env.example` for the full list.
+`.env.example` covers the most common knobs; this section is the canonical
+list of currently supported environment variables.
 
 ## Credentials and Dialog Behavior
 
@@ -288,7 +290,7 @@ State lives under `~/.glucobar/` (configurable via `DAEMON_STATE_DIR`):
 
 - `daemon.lock` — single-instance guard
 - `session.json` — cached LibreView session token
-- `logs/daemon.log*` — rotating log (1 MB × 5 files)
+- `daemon.log` (+ `.1`..`.3`) — rotating log (1 MB × 3 backups)
 
 Credentials live in the macOS Keychain under service name `glucobar`.
 Remove them with `scripts/set_credentials.py --clear` or via
@@ -353,7 +355,8 @@ progress toward a downloadable build:
 - [ ] Homebrew Cask tap
 - [ ] (Stretch) Developer ID signing + notarization
 
-Until those land, install from source using the instructions above.
+Install from source using the instructions above, or use the release workflow
+artifacts when you want a standalone zip build.
 
 ## Contributing
 

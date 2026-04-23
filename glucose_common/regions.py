@@ -84,7 +84,7 @@ def resolve_libreview_region(raw: str) -> tuple[APIUrl, str | None]:
     except KeyError:
         valid_api = ", ".join(m.name for m in APIUrl)
         valid_alias = ", ".join(sorted(_REGION_ALIASES))
-        raise SystemExit(
+        raise ValueError(
             f"Unknown LIBREVIEW_REGION '{raw.strip()}'.\n"
             f"  Use a cluster name: {valid_api}\n"
             f"  Or a supported country code: {valid_alias}\n"

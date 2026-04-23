@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.concurrency import run_in_threadpool
 
 # Allow running as ``python -m daemon`` from the repo root.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -39,6 +40,7 @@ from .models import (  # noqa: E402
     HealthResponse,
     PatientResponse,
 )
+from .parent_watch import enable_from_env  # noqa: E402
 from .service import GlucoseService  # noqa: E402
 from .session_store import FileSessionStore  # noqa: E402
 from .single_instance import acquire_lock  # noqa: E402
@@ -76,6 +78,7 @@ def _build_service(settings: Settings) -> GlucoseService:
 # lock is acquired here, not in lifespan, because by the time lifespan runs
 # uvicorn has already bound the listening socket — and we want to bail out
 # *before* that to keep error messages clean.
+enable_from_env()
 try:
     _settings = load_settings()
 except MissingCredentialsError as _e:
@@ -85,7 +88,11 @@ except MissingCredentialsError as _e:
     sys.exit(78)
 configure_logging(_settings.log_level, _settings.log_path)
 acquire_lock(_settings.lock_path)
-_service = _build_service(_settings)
+try:
+    _service = _build_service(_settings)
+except ValueError as _e:
+    print(f"glucose-daemon: {_e}", file=sys.stderr)
+    sys.exit(78)
 
 
 def _install_signal_handlers() -> None:
@@ -240,17 +247,18 @@ async def graph(hours: int = 8) -> list[GraphPoint]:
 
 @app.get("/patient", response_model=PatientResponse)
 async def patient() -> PatientResponse:
-    p = _service.patient
-    if p is None:
+    patient_info = _service.patient_snapshot()
+    if patient_info is None:
         raise HTTPException(status_code=503, detail="Daemon not authenticated")
+    first_name, last_name, patient_id = patient_info
     return PatientResponse(
-        first_name=p.first_name,
-        last_name=p.last_name,
-        patient_id=str(getattr(p, "patient_id", "") or "") or None,
+        first_name=first_name,
+        last_name=last_name,
+        patient_id=patient_id,
     )
 
 
 @app.post("/auth/refresh", response_model=HealthResponse)
 async def auth_refresh() -> HealthResponse:
-    _service.force_refresh()
+    await run_in_threadpool(_service.force_refresh)
     return await health()

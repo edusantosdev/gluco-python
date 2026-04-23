@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "glucobar"
 version = "0.3.0"
@@ -35,6 +39,7 @@ dependencies = [
     "keyring>=24.0",
     # Daemon HTTP API.
     "fastapi>=0.110",
+    "pydantic>=2.0",
     "uvicorn>=0.29",
     # Typed settings for the daemon.
     "pydantic-settings>=2.0",

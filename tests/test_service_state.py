@@ -23,7 +23,6 @@ from daemon.service import GlucoseService
 from daemon.session_store import FileSessionStore
 from daemon.state import Status
 
-
 # --- fakes ---
 
 
