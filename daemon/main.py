@@ -26,7 +26,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from glucose_common.regions import resolve_librelinkup_region  # noqa: E402
+from glucose_common.regions import resolve_libreview_region  # noqa: E402
 from glucose_common.trend import trend_name, trend_symbol  # noqa: E402
 from glucose_common.units import glucose_unit_label  # noqa: E402
 
@@ -48,15 +48,15 @@ log = logging.getLogger("glucose.daemon")
 
 
 def _build_service(settings: Settings) -> GlucoseService:
-    region, region_hint = resolve_librelinkup_region(settings.librelinkup_region)
+    region, region_hint = resolve_libreview_region(settings.libreview_region)
     if region_hint:
         log.info("%s", region_hint)
-    log.info("Credentials loaded from %s", settings.credentials_source)
+    log.info("Credentials loaded from macOS Keychain")
     # Safe by construction: ``load_settings`` raises if creds are missing.
-    assert settings.librelinkup_email and settings.librelinkup_password
+    assert settings.libreview_email and settings.libreview_password
     return GlucoseService(
-        email=settings.librelinkup_email,
-        password=settings.librelinkup_password.get_secret_value(),
+        email=settings.libreview_email,
+        password=settings.libreview_password.get_secret_value(),
         region=region,
         poll_interval=settings.poll_interval_seconds,
         stale_after_seconds=settings.stale_after_seconds,
@@ -136,8 +136,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="glucose-daemon",
-    version="0.2.0",
-    description="Personal LibreLinkUp polling daemon — local HTTP API.",
+    version="0.4.0",
+    description="Personal LibreView polling daemon — local HTTP API.",
     lifespan=lifespan,
 )
 

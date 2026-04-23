@@ -1,4 +1,4 @@
-"""Map ``LIBRELINKUP_REGION`` env values to ``pylibrelinkup.APIUrl``.
+"""Map ``LIBREVIEW_REGION`` env values to ``pylibrelinkup.APIUrl``.
 
 LibreView exposes named clusters (``US``, ``EU``, ``DE``, …), not every ISO
 country code. Users often set their country (e.g. ``PT``) — we translate
@@ -49,7 +49,7 @@ _REGION_ALIASES: dict[str, str] = {
 }
 
 
-def resolve_librelinkup_region(raw: str) -> tuple[APIUrl, str | None]:
+def resolve_libreview_region(raw: str) -> tuple[APIUrl, str | None]:
     """Return ``(api_url, hint)`` where ``hint`` is set when an alias was used."""
     key = raw.strip().upper()
     if not key:
@@ -62,7 +62,7 @@ def resolve_librelinkup_region(raw: str) -> tuple[APIUrl, str | None]:
         valid_api = ", ".join(m.name for m in APIUrl)
         valid_alias = ", ".join(sorted(_REGION_ALIASES))
         raise SystemExit(
-            f"Unknown LIBRELINKUP_REGION '{raw.strip()}'.\n"
+            f"Unknown LIBREVIEW_REGION '{raw.strip()}'.\n"
             f"  Use a cluster name: {valid_api}\n"
             f"  Or a supported country code: {valid_alias}\n"
             f"  Portugal: set EU (or PT — we map PT to EU)."

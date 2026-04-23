@@ -1,17 +1,10 @@
 """Typed settings for the daemon.
 
-Reads from environment variables (and ``.env`` if present). Centralizing
-config here means everything else in the daemon can ask for ``settings.X``
-without doing its own env parsing.
-
-Credentials
------------
-Email + password may come from either the macOS Keychain (via
-``glucose_common.credentials``) or from ``.env``. To keep the same code
-path across dev and production, we let pydantic ingest env vars freely
-and then reconcile with Keychain in ``load_settings()`` — the resulting
-``Settings`` always has a concrete email/password, whichever source they
-came from.
+Reads non-credential settings from environment variables (and ``.env``
+if present). Credentials are read exclusively from the macOS Keychain
+via :mod:`glucose_common.credentials` — there is no env fallback. If the
+Keychain has no entries on startup, the daemon exits cleanly and waits
+for the menubar frontend to prompt the user and seed them.
 """
 
 from __future__ import annotations
@@ -30,11 +23,6 @@ from glucose_common.credentials import load_credentials  # noqa: E402
 
 
 def _default_state_dir() -> Path:
-    # Renamed from ``~/.glucose-display`` in v0.3.0. The daemon
-    # recreates the directory on first run; any cached session will be
-    # refreshed on the next LibreLinkUp call, so no explicit migration
-    # is needed. Users who want to preserve rotating logs can
-    # ``mv ~/.glucose-display ~/.glucobar`` before the first run.
     return Path.home() / ".glucobar"
 
 
@@ -46,15 +34,12 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    # Optional at the pydantic layer so a Keychain-only install can boot
-    # without either variable being set. ``load_settings()`` fills them
-    # before returning, and fails loudly if neither source has them.
-    librelinkup_email: str | None = Field(default=None, alias="LIBRELINKUP_EMAIL")
-    librelinkup_password: SecretStr | None = Field(default=None, alias="LIBRELINKUP_PASSWORD")
-    librelinkup_region: str = Field(default="US", alias="LIBRELINKUP_REGION")
-
-    # Reported back in logs so users can tell whether Keychain is active.
-    credentials_source: str = Field(default="env")
+    # Populated by ``load_settings()`` from the Keychain. Not sourced
+    # from env so a stray ``LIBREVIEW_*`` variable in someone's shell
+    # can't override the Keychain value.
+    libreview_email: str | None = Field(default=None)
+    libreview_password: SecretStr | None = Field(default=None)
+    libreview_region: str = Field(default="US", alias="LIBREVIEW_REGION")
 
     poll_interval_seconds: int = Field(default=60, alias="POLL_INTERVAL_SECONDS")
 
@@ -103,30 +88,26 @@ class Settings(BaseSettings):
 
 
 class MissingCredentialsError(RuntimeError):
-    """Neither Keychain nor env supplied a full email+password pair."""
+    """The Keychain has no LibreView credentials yet."""
 
 
 def load_settings() -> Settings:
-    """Instantiate ``Settings`` and reconcile credentials with Keychain.
+    """Instantiate ``Settings`` and load credentials from the Keychain.
 
     Kept as a function so tests can monkeypatch ``load_credentials`` and
     the environment independently."""
     s = Settings()  # type: ignore[call-arg]  — pulled from env at runtime
 
-    env_email = s.librelinkup_email
-    env_password = s.librelinkup_password.get_secret_value() if s.librelinkup_password else None
-    resolved = load_credentials(env_email=env_email, env_password=env_password)
-
+    resolved = load_credentials()
     if resolved is None:
         raise MissingCredentialsError(
-            "No LibreLinkUp credentials found. "
-            "Either run `python scripts/set_credentials.py` to store them in "
-            "macOS Keychain, or set LIBRELINKUP_EMAIL/LIBRELINKUP_PASSWORD in .env."
+            "No LibreView credentials found in the macOS Keychain. "
+            "Start the menubar app to be prompted on first run, or run "
+            "`python scripts/set_credentials.py` to save them manually."
         )
 
-    s.librelinkup_email = resolved.email
-    s.librelinkup_password = SecretStr(resolved.password)
-    s.credentials_source = resolved.source
+    s.libreview_email = resolved.email
+    s.libreview_password = SecretStr(resolved.password)
 
     s.state_dir.mkdir(parents=True, exist_ok=True)
     return s

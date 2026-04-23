@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
-"""One-shot helper: stash LibreLinkUp credentials in macOS Keychain.
+"""One-shot helper: stash LibreView credentials in macOS Keychain.
 
-Run once before enabling the LaunchAgent::
+Normally the menubar app prompts you for credentials on first launch;
+this script is for users who prefer the terminal or need to re-seed the
+Keychain in automation::
 
     .venv/bin/python scripts/set_credentials.py
 
-On success, the daemon can load ``LIBRELINKUP_EMAIL`` / ``_PASSWORD`` from
-the Keychain on every boot, and ``.env`` stops being required (though it
-still works as a fallback for dev or headless use).
-
-The script never prints the password back. Use ``--clear`` to remove the
-stored entries.
+The script never prints the password back. Use ``--clear`` to remove
+the stored entries.
 """
 
 from __future__ import annotations
@@ -33,10 +31,10 @@ from glucose_common.credentials import (  # noqa: E402
 
 
 def _prompt_credentials() -> tuple[str, str]:
-    email = input("LibreLinkUp email: ").strip()
+    email = input("LibreView email: ").strip()
     if not email:
         raise SystemExit("aborted: empty email")
-    password = getpass.getpass("LibreLinkUp password: ")
+    password = getpass.getpass("LibreView password: ")
     if not password:
         raise SystemExit("aborted: empty password")
     confirm = getpass.getpass("Confirm password: ")
@@ -55,16 +53,18 @@ def main() -> int:
     parser.add_argument(
         "--show",
         action="store_true",
-        help="show which source the daemon would use right now",
+        help="show the stored email (password is never printed)",
     )
     args = parser.parse_args()
 
     if args.show:
-        creds = load_credentials(env_email=None, env_password=None)
+        creds = load_credentials()
         if creds is None:
-            print("No credentials in Keychain. Daemon will use .env if present.")
+            print(
+                "No credentials in Keychain. The menubar app will prompt on "
+                "first launch, or run this script without --show to save them."
+            )
             return 0
-        # Never print the password back.
         print(f"Keychain: service='{KEYCHAIN_SERVICE}', email='{creds.email}'")
         return 0
 
@@ -79,10 +79,7 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         print(f"Could not save to Keychain: {e}", file=sys.stderr)
         return 1
-    print(
-        f"Saved to Keychain as service='{KEYCHAIN_SERVICE}'. "
-        "You can delete LIBRELINKUP_EMAIL/_PASSWORD from .env now."
-    )
+    print(f"Saved to Keychain as service='{KEYCHAIN_SERVICE}'.")
     return 0
 
 

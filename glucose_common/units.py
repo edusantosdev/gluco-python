@@ -1,4 +1,4 @@
-"""LibreLinkUp glucose-unit code → human-readable label.
+"""LibreView glucose-unit code → human-readable label.
 
 The API encodes the unit as an integer on each reading. There is no
 official upstream mapping in ``pylibrelinkup``; observed values are:

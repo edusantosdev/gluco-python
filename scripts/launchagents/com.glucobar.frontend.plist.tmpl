@@ -42,8 +42,12 @@
 
     <key>RunAtLoad</key>
     <true/>
+    <!--
+      Don't relaunch immediately after a user-initiated Quit from the menu.
+      We still start on login via RunAtLoad.
+    -->
     <key>KeepAlive</key>
-    <true/>
+    <false/>
     <key>ThrottleInterval</key>
     <integer>10</integer>
 

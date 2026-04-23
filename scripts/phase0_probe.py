@@ -1,11 +1,13 @@
-"""Phase 0 — Verify the LibreLinkUp API works for your account.
+"""Phase 0 — Verify the LibreView API works for your account.
 
 Run this BEFORE doing anything else in the project. If it prints a glucose
 value, the rest of the architecture is worth building. If it fails, read
 the error and fix that first (region wrong, ToS not accepted, etc.).
 
-Usage:
-    cp .env.example .env          # then edit with your credentials
+Reads credentials from the macOS Keychain (the only place Glucobar
+stores them). If none are present, seed them first::
+
+    .venv/bin/python scripts/set_credentials.py
     .venv/bin/python scripts/phase0_probe.py
     .venv/bin/python scripts/phase0_probe.py --region EU   # if outside the US
 """
@@ -18,13 +20,12 @@ import os
 import sys
 from pathlib import Path
 
-# Allow `python scripts/phase0_probe.py` — repo root must be on sys.path.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from dotenv import load_dotenv
-from pylibrelinkup import (
+from dotenv import load_dotenv  # noqa: E402
+from pylibrelinkup import (  # noqa: E402
     AuthenticationError,
     LLUAPIRateLimitError,
     PrivacyPolicyError,
@@ -32,34 +33,37 @@ from pylibrelinkup import (
     TermsOfUseError,
 )
 
-from glucose_common.regions import resolve_librelinkup_region
+from glucose_common.credentials import load_credentials  # noqa: E402
+from glucose_common.regions import resolve_libreview_region  # noqa: E402
 
 
 def main() -> int:
+    # ``.env`` only carries non-secret settings now (region, thresholds,
+    # etc.); loading it keeps ``LIBREVIEW_REGION`` honored without
+    # pulling credentials from it.
     load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--region",
-        default=os.environ.get("LIBRELINKUP_REGION", "US"),
-        help="LibreLinkUp region (US, EU, EU2, AE, AP, AU, CA, DE, FR, JP, LA, RU)",
+        default=os.environ.get("LIBREVIEW_REGION", "US"),
+        help="LibreView region (US, EU, EU2, AE, AP, AU, CA, DE, FR, JP, LA, RU)",
     )
     args = parser.parse_args()
 
-    email = os.environ.get("LIBRELINKUP_EMAIL")
-    password = os.environ.get("LIBRELINKUP_PASSWORD")
-    if not email or not password:
+    creds = load_credentials()
+    if creds is None:
         raise SystemExit(
-            "LIBRELINKUP_EMAIL / LIBRELINKUP_PASSWORD not set. "
-            "Copy .env.example to .env and fill it in."
+            "No LibreView credentials in the macOS Keychain. "
+            "Run `.venv/bin/python scripts/set_credentials.py` first."
         )
 
-    region, region_hint = resolve_librelinkup_region(args.region)
+    region, region_hint = resolve_libreview_region(args.region)
     print(f"Region: {region.name} ({region.value})", file=sys.stderr)
     if region_hint:
         print(f"Note: {region_hint}", file=sys.stderr)
 
-    client = PyLibreLinkUp(email=email, password=password, api_url=region)
+    client = PyLibreLinkUp(email=creds.email, password=creds.password, api_url=region)
     try:
         client.authenticate()
     except TermsOfUseError:
@@ -86,7 +90,7 @@ def main() -> int:
     patients = client.get_patients()
     if not patients:
         print(
-            "Authenticated OK but no patients are shared with this LibreLinkUp "
+            "Authenticated OK but no patients are shared with this LibreView "
             "account. In the official Libre app, make sure someone has invited "
             "you (or you are self-sharing).",
             file=sys.stderr,

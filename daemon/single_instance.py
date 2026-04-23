@@ -1,4 +1,4 @@
-"""Prevent two daemons from racing against the same LibreLinkUp account.
+"""Prevent two daemons from racing against the same LibreView account.
 
 A misfiring LaunchAgent or a manual double-launch will produce two
 processes that both authenticate, both poll, and trip Abbott's

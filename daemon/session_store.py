@@ -1,4 +1,4 @@
-"""Persist the LibreLinkUp auth token across daemon restarts.
+"""Persist the LibreView auth token across daemon restarts.
 
 Rationale
 ---------
@@ -23,9 +23,8 @@ If parsing fails, we fall back to a conservative TTL set at save time.
 Security notes
 --------------
 The token grants read access to the *connections* endpoints for this
-LibreLinkUp account. We store it mode-0600 under ``state_dir`` — same
-sensitivity tier as the credentials that produced it (Keychain or
-``.env``).
+LibreView account. We store it mode-0600 under ``state_dir`` — same
+sensitivity tier as the Keychain entry that produced it.
 """
 
 from __future__ import annotations

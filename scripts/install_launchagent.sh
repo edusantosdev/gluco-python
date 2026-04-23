@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
-# Install / uninstall the LaunchAgents for Glucobar.
+# Install / uninstall the Glucobar LaunchAgent.
 #
 # Usage:
-#   scripts/install_launchagent.sh install     # render templates + bootstrap
-#   scripts/install_launchagent.sh uninstall   # bootout + remove plists
-#   scripts/install_launchagent.sh status      # is launchd running them?
-#   scripts/install_launchagent.sh logs        # tail launchd stdout/stderr
+#   scripts/install_launchagent.sh install     # render template + bootstrap
+#   scripts/install_launchagent.sh uninstall   # bootout + remove plist
+#   scripts/install_launchagent.sh status      # is launchd running it?
+#   scripts/install_launchagent.sh logs        # tail stdout/stderr
+#
+# Only the *frontend* LaunchAgent is installed. From v0.3 onward the
+# daemon runs as a child process of the frontend under
+# ``macos_frontend.daemon_supervisor`` — so one launchd job covers
+# everything. A standalone ``com.glucobar.daemon`` template is still
+# shipped under scripts/launchagents/ for power users who want the
+# pre-0.3 split (combine with ``GLUCOBAR_SUPERVISE_DAEMON=0`` in the
+# frontend environment), but this installer does not use it.
 #
 # The templates under scripts/launchagents/ use __VENV_PYTHON__,
 # __REPO_ROOT__, __STATE_DIR__, and __APP_EXECUTABLE__ placeholders so
@@ -18,22 +26,23 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENV_PYTHON="${REPO_ROOT}/.venv/bin/python"
 STATE_DIR="${DAEMON_STATE_DIR:-$HOME/.glucobar}"
 
-DAEMON_LABEL="com.glucobar.daemon"
 FRONTEND_LABEL="com.glucobar.frontend"
 
-# Pre-rename labels from the "glucose-display" era. Install/uninstall
-# bootout these too so users upgrading from <=0.2.0 don't end up with
-# two daemons racing the same LibreLinkUp session.
-LEGACY_DAEMON_LABEL="com.glucose-display.daemon"
-LEGACY_FRONTEND_LABEL="com.glucose-display.frontend"
+# Labels we *used* to install. Every ``install`` sweeps these out so
+# upgrades don't leave a second daemon racing the supervised child
+# for the same LibreView session. Both pre-rename (pre-0.3,
+# ``glucose-display``) and post-rename-pre-supervisor (0.3.0
+# two-LaunchAgent model) labels are in this list.
+LEGACY_DAEMON_LABEL="com.glucobar.daemon"
+LEGACY_DAEMON_DISPLAY_LABEL="com.glucose-display.daemon"
+LEGACY_FRONTEND_DISPLAY_LABEL="com.glucose-display.frontend"
 
 LA_DIR="${HOME}/Library/LaunchAgents"
-DAEMON_PLIST="${LA_DIR}/${DAEMON_LABEL}.plist"
 FRONTEND_PLIST="${LA_DIR}/${FRONTEND_LABEL}.plist"
 LEGACY_DAEMON_PLIST="${LA_DIR}/${LEGACY_DAEMON_LABEL}.plist"
-LEGACY_FRONTEND_PLIST="${LA_DIR}/${LEGACY_FRONTEND_LABEL}.plist"
+LEGACY_DAEMON_DISPLAY_PLIST="${LA_DIR}/${LEGACY_DAEMON_DISPLAY_LABEL}.plist"
+LEGACY_FRONTEND_DISPLAY_PLIST="${LA_DIR}/${LEGACY_FRONTEND_DISPLAY_LABEL}.plist"
 
-DAEMON_TMPL="${REPO_ROOT}/scripts/launchagents/${DAEMON_LABEL}.plist.tmpl"
 FRONTEND_TMPL="${REPO_ROOT}/scripts/launchagents/${FRONTEND_LABEL}.plist.tmpl"
 
 # The frontend runs out of a thin .app bundle so AppKit sees a proper
@@ -60,11 +69,19 @@ bootout_agent() {
 
 bootstrap_agent() {
     local label="$1" plist="$2"
+    # launchd remembers per-label "disabled" state independently of
+    # whether the label is currently loaded. A previous ``bootout``
+    # or an explicit ``launchctl disable`` will make ``bootstrap``
+    # fail with the uninformative ``5: Input/output error`` until we
+    # re-enable the label. This is a no-op if the label was already
+    # enabled.
+    launchctl enable "${GUI_DOMAIN}/${label}" 2>/dev/null || true
     if launchctl bootstrap "${GUI_DOMAIN}" "${plist}"; then
         return 0
     fi
     echo "warn: bootstrap failed for ${label}; retrying after forced bootout" >&2
     bootout_agent "${label}" "${plist}"
+    launchctl enable "${GUI_DOMAIN}/${label}" 2>/dev/null || true
     launchctl bootstrap "${GUI_DOMAIN}" "${plist}"
 }
 
@@ -142,6 +159,21 @@ build_app_bundle() {
         -f "${APP_BUNDLE_DST}" >/dev/null 2>&1 || true
 }
 
+sweep_legacy_daemon_agents() {
+    # Every ``install`` flushes any previously-installed daemon
+    # LaunchAgent (from 0.3.0's two-LaunchAgent model, or from the
+    # pre-rename "glucose-display" era). Two daemons against the same
+    # account will both authenticate and both poll, which reliably
+    # trips Abbott's rate limiter.
+    bootout_agent "${LEGACY_DAEMON_LABEL}" "${LEGACY_DAEMON_PLIST}"
+    bootout_agent "${LEGACY_DAEMON_DISPLAY_LABEL}" "${LEGACY_DAEMON_DISPLAY_PLIST}"
+    bootout_agent "${LEGACY_FRONTEND_DISPLAY_LABEL}" "${LEGACY_FRONTEND_DISPLAY_PLIST}"
+    rm -f "${LEGACY_DAEMON_PLIST}" \
+          "${LEGACY_DAEMON_DISPLAY_PLIST}" \
+          "${LEGACY_FRONTEND_DISPLAY_PLIST}"
+    rm -rf "${LEGACY_APP_BUNDLE_DST}"
+}
+
 cmd_install() {
     if [ ! -x "${VENV_PYTHON}" ]; then
         echo "error: ${VENV_PYTHON} not found. Create the venv first:" >&2
@@ -150,8 +182,8 @@ cmd_install() {
     fi
     echo >&2 "Note: stop any manually started daemon first (terminal:"
     echo >&2 "  .venv/bin/python -m daemon"
-    echo >&2 "Only one process may hold ${STATE_DIR}/daemon.lock — otherwise"
-    echo >&2 "this LaunchAgent will fail with 'Another glucose daemon is already running'."
+    echo >&2 "Only one process may hold ${STATE_DIR}/daemon.lock — the"
+    echo >&2 "supervised daemon will refuse to start otherwise."
     mkdir -p "${LA_DIR}" "${STATE_DIR}"
 
     # The frontend plist's ProgramArguments[0] points at the symlinked
@@ -159,71 +191,63 @@ cmd_install() {
     # bootstrap.
     build_app_bundle
 
-    render_plist "${DAEMON_TMPL}" "${DAEMON_PLIST}"
     render_plist "${FRONTEND_TMPL}" "${FRONTEND_PLIST}"
     # Plists under ~/Library/LaunchAgents must not be world-writable.
-    chmod 0644 "${DAEMON_PLIST}" "${FRONTEND_PLIST}"
+    chmod 0644 "${FRONTEND_PLIST}"
 
-    # Upgrading from the pre-rename "glucose-display" labels: bootout
-    # the old pair so two daemons aren't polling LibreLinkUp at once,
-    # and remove the stale plist files from ~/Library/LaunchAgents/.
-    bootout_agent "${LEGACY_DAEMON_LABEL}" "${LEGACY_DAEMON_PLIST}"
-    bootout_agent "${LEGACY_FRONTEND_LABEL}" "${LEGACY_FRONTEND_PLIST}"
-    rm -f "${LEGACY_DAEMON_PLIST}" "${LEGACY_FRONTEND_PLIST}"
-    rm -rf "${LEGACY_APP_BUNDLE_DST}"
+    sweep_legacy_daemon_agents
 
     # "bootstrap" is the modern replacement for "load". It's a no-op if
     # the label is already loaded, so we unload first to pick up template
     # changes (path moves, env var additions, etc.).
-    bootout_agent "${DAEMON_LABEL}" "${DAEMON_PLIST}"
     bootout_agent "${FRONTEND_LABEL}" "${FRONTEND_PLIST}"
-    bootstrap_agent "${DAEMON_LABEL}" "${DAEMON_PLIST}"
     bootstrap_agent "${FRONTEND_LABEL}" "${FRONTEND_PLIST}"
     # kickstart triggers an immediate start without waiting for login.
-    launchctl kickstart -k "${GUI_DOMAIN}/${DAEMON_LABEL}"   || true
     launchctl kickstart -k "${GUI_DOMAIN}/${FRONTEND_LABEL}" || true
 
-    echo "Installed LaunchAgents:"
-    echo "  ${DAEMON_PLIST}"
+    echo "Installed LaunchAgent:"
     echo "  ${FRONTEND_PLIST}"
+    echo "  (the frontend supervises the daemon as a child process)"
     echo
     echo "Check status:  scripts/install_launchagent.sh status"
     echo "Tail logs:     scripts/install_launchagent.sh logs"
 }
 
 cmd_uninstall() {
-    bootout_agent "${DAEMON_LABEL}" "${DAEMON_PLIST}"
     bootout_agent "${FRONTEND_LABEL}" "${FRONTEND_PLIST}"
-    # Also sweep the pre-rename labels if they're still around.
-    bootout_agent "${LEGACY_DAEMON_LABEL}" "${LEGACY_DAEMON_PLIST}"
-    bootout_agent "${LEGACY_FRONTEND_LABEL}" "${LEGACY_FRONTEND_PLIST}"
-    rm -f "${DAEMON_PLIST}" "${FRONTEND_PLIST}" \
-          "${LEGACY_DAEMON_PLIST}" "${LEGACY_FRONTEND_PLIST}"
-    echo "Removed LaunchAgents (plist files and loaded jobs)."
+    sweep_legacy_daemon_agents
+    rm -f "${FRONTEND_PLIST}"
+    echo "Removed LaunchAgent (plist file and loaded job)."
 }
 
 cmd_status() {
     # launchctl print returns 113 when the label isn't loaded. Show a
     # friendly summary rather than the 300-line raw dump.
-    for label in "${DAEMON_LABEL}" "${FRONTEND_LABEL}"; do
-        if launchctl print "${GUI_DOMAIN}/${label}" >/dev/null 2>&1; then
-            local state
-            state=$(launchctl print "${GUI_DOMAIN}/${label}" | awk '/state = /{print $3; exit}')
-            echo "${label}: ${state:-unknown}"
-        else
-            echo "${label}: not loaded"
-        fi
-    done
+    if launchctl print "${GUI_DOMAIN}/${FRONTEND_LABEL}" >/dev/null 2>&1; then
+        local state
+        state=$(launchctl print "${GUI_DOMAIN}/${FRONTEND_LABEL}" \
+                | awk '/state = /{print $3; exit}')
+        echo "${FRONTEND_LABEL}: ${state:-unknown}"
+    else
+        echo "${FRONTEND_LABEL}: not loaded"
+    fi
 }
 
 cmd_logs() {
-    echo "=== ${STATE_DIR}/launchd.daemon.{out,err}.log ==="
-    tail -n 40 "${STATE_DIR}/launchd.daemon.out.log" \
-              "${STATE_DIR}/launchd.daemon.err.log" 2>/dev/null || true
-    echo
+    # The frontend's launchd redirected stdio, plus the daemon child's
+    # stdio captured by the supervisor, plus the daemon's own rotating
+    # application log. Between them these three cover every crash
+    # and restart.
     echo "=== ${STATE_DIR}/launchd.frontend.{out,err}.log ==="
     tail -n 40 "${STATE_DIR}/launchd.frontend.out.log" \
               "${STATE_DIR}/launchd.frontend.err.log" 2>/dev/null || true
+    echo
+    echo "=== ${STATE_DIR}/daemon.{stdout,stderr}.log  (supervisor) ==="
+    tail -n 40 "${STATE_DIR}/daemon.stdout.log" \
+              "${STATE_DIR}/daemon.stderr.log" 2>/dev/null || true
+    echo
+    echo "=== ${STATE_DIR}/logs/daemon.log  (daemon rotating log) ==="
+    tail -n 40 "${STATE_DIR}/logs/daemon.log" 2>/dev/null || true
 }
 
 case "${1:-}" in

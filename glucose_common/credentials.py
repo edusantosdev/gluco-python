@@ -1,12 +1,12 @@
-"""Credentials resolver — Keychain first, environment/.env as fallback.
+"""Credentials resolver — macOS Keychain is the only source of truth.
 
 Why a shared module
 -------------------
 The daemon reads creds at startup, the ``set_credentials.py`` helper
-writes them, and the preferences UI updates them. Keeping the Keychain
-keys and lookup logic in one place means there is exactly one definition
-of "where does the email live?" — no way to typo a service name in one
-spot and silently read a stale value in another.
+writes them, and the menubar preferences UI updates them. Keeping the
+Keychain keys and lookup logic in one place means there is exactly one
+definition of "where does the email live?" — no way to typo a service
+name in one spot and silently read a stale value in another.
 
 Storage layout
 --------------
@@ -17,18 +17,15 @@ Keychain-visible group:
     service  = "glucobar"
     username = "email"     → the account email (not secret, but kept here
                              so a single Keychain entry covers everything)
-    username = "password"  → the LibreLinkUp password
-
-If the Keychain is unreadable (no GUI session, CI, remote SSH without
-`security unlock-keychain`), we fall back to environment variables so
-development and headless usage both keep working. That matches the
-plan's guidance: Keychain first, ``.env`` fallback, same code path.
+    username = "password"  → the LibreView password
 
 .. note::
-   Prior to v0.3.0 the service name was ``librelinkup-glucose-menubar``.
-   Existing Keychain entries under that name are not migrated
-   automatically — run ``scripts/set_credentials.py`` once after
-   upgrading to re-save under ``glucobar``.
+   Prior to v0.4.0 the daemon also accepted ``LIBREVIEW_EMAIL`` /
+   ``LIBREVIEW_PASSWORD`` (originally ``LIBRELINKUP_*``) from the
+   environment as a fallback. That path is gone: the daemon and menubar
+   now only read credentials from the Keychain. On first launch the
+   menubar prompts for them; to change them later, use the
+   **LibreView Account** menu item or ``scripts/set_credentials.py``.
 """
 
 from __future__ import annotations
@@ -72,40 +69,30 @@ def _default_keyring() -> KeyringLike | None:
 class Credentials:
     email: str
     password: str
-    source: str  # "keychain" | "env" — useful for logs and prefs UI
 
 
 def load_credentials(
-    env_email: str | None,
-    env_password: str | None,
     *,
     keyring_module: KeyringLike | None = None,
 ) -> Credentials | None:
-    """Return the best available credentials, or ``None`` if none exist.
+    """Return the stored credentials, or ``None`` if the Keychain has none.
 
-    Precedence (from plan §10):
-        1. Keychain (via ``keyring``) — production path
-        2. Env / ``.env`` — dev + headless fallback
-
-    We deliberately don't mix sources within a single call (e.g. email
-    from Keychain + password from env). If the Keychain has one of the
-    two but not both, we treat it as absent and fall through to env.
-    A partially-seeded Keychain is always a bug, and silently combining
-    would make that bug invisible.
+    Both halves (email + password) must be present; if the Keychain has
+    only one of the two we treat it as absent. A partially-seeded
+    Keychain is always a bug, and silently returning half of it would
+    make that bug invisible.
     """
     kr = keyring_module if keyring_module is not None else _default_keyring()
-    if kr is not None:
-        try:
-            kc_email = kr.get_password(KEYCHAIN_SERVICE, _EMAIL_KEY)
-            kc_password = kr.get_password(KEYCHAIN_SERVICE, _PASSWORD_KEY)
-        except Exception as e:  # noqa: BLE001 — locked keychain etc.
-            log.warning("Keychain read failed; falling back to env: %s", e)
-            kc_email = kc_password = None
-        if kc_email and kc_password:
-            return Credentials(email=kc_email, password=kc_password, source="keychain")
-
-    if env_email and env_password:
-        return Credentials(email=env_email, password=env_password, source="env")
+    if kr is None:
+        return None
+    try:
+        kc_email = kr.get_password(KEYCHAIN_SERVICE, _EMAIL_KEY)
+        kc_password = kr.get_password(KEYCHAIN_SERVICE, _PASSWORD_KEY)
+    except Exception as e:  # noqa: BLE001 — locked keychain etc.
+        log.warning("Keychain read failed: %s", e)
+        return None
+    if kc_email and kc_password:
+        return Credentials(email=kc_email, password=kc_password)
     return None
 
 
@@ -121,7 +108,8 @@ def save_credentials(
     kr = keyring_module if keyring_module is not None else _default_keyring()
     if kr is None:
         raise RuntimeError(
-            "keyring is not available — install it or edit .env instead"
+            "keyring is not available — install the `keyring` Python package "
+            "and ensure the macOS Keychain is reachable"
         )
     kr.set_password(KEYCHAIN_SERVICE, _EMAIL_KEY, email)
     kr.set_password(KEYCHAIN_SERVICE, _PASSWORD_KEY, password)

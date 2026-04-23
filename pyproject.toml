@@ -1,11 +1,11 @@
 [project]
 name = "glucobar"
 version = "0.3.0"
-description = "Glucobar — macOS menubar glucose display backed by LibreLinkUp."
+description = "Glucobar — macOS menubar glucose display backed by LibreView."
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
-keywords = ["glucose", "librelinkup", "menubar", "macos", "cgm", "freestyle-libre"]
+keywords = ["glucose", "libreview", "librelinkup", "menubar", "macos", "cgm", "freestyle-libre"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: MacOS X",
@@ -22,7 +22,9 @@ classifiers = [
 # so they all live under the default install set. ``pip install -e .``
 # alone is enough to run the app; no extras dance.
 dependencies = [
-    # LibreLinkUp client used by the daemon and the phase-0 probe.
+    # LibreView client library used by the daemon and the phase-0 probe.
+    # (Package is named ``pylibrelinkup`` for historical reasons; it talks
+    # to the LibreView backend the web dashboard uses.)
     "pylibrelinkup>=0.10.0,<0.12",
     # Menubar UI; pulls in pyobjc-framework-Cocoa, which gives us
     # ``AppKit`` and ``Foundation`` for the native dialogs in the frontend.

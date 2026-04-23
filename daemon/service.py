@@ -1,13 +1,15 @@
-"""Background polling service that owns the pylibrelinkup client.
+"""Background polling service that owns the LibreView client.
 
 Threading model
 ---------------
 
-``pylibrelinkup`` is synchronous; its calls block on network I/O. Rather
-than scatter ``asyncio.to_thread`` calls through async route handlers,
-we run the poller in a dedicated daemon thread. FastAPI handlers stay
-``async`` and do non-blocking reads from a lock-guarded ``DaemonState``
-snapshot. This decouples poll cadence from request latency entirely.
+The ``pylibrelinkup`` client (which talks to the same LibreView backend
+the web dashboard uses) is synchronous; its calls block on network I/O.
+Rather than scatter ``asyncio.to_thread`` calls through async route
+handlers, we run the poller in a dedicated daemon thread. FastAPI
+handlers stay ``async`` and do non-blocking reads from a lock-guarded
+``DaemonState`` snapshot. This decouples poll cadence from request
+latency entirely.
 
 Robustness features
 -------------------

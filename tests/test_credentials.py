@@ -1,4 +1,4 @@
-"""Credentials precedence + failure modes for ``glucose_common.credentials``."""
+"""Keychain-only resolver + failure modes for ``glucose_common.credentials``."""
 
 from __future__ import annotations
 
@@ -31,49 +31,31 @@ class FakeKeyring:
         self._store.pop((service, username), None)
 
 
-def test_keychain_takes_precedence_over_env() -> None:
+def test_load_returns_keychain_values() -> None:
     kr = FakeKeyring()
     save_credentials("k@x", "kpw", keyring_module=kr)
-    creds = load_credentials(
-        env_email="env@x", env_password="envpw", keyring_module=kr
-    )
+    creds = load_credentials(keyring_module=kr)
     assert creds is not None
     assert creds.email == "k@x"
     assert creds.password == "kpw"
-    assert creds.source == "keychain"
 
 
-def test_env_used_when_keychain_empty() -> None:
+def test_load_returns_none_when_keychain_empty() -> None:
     kr = FakeKeyring()
-    creds = load_credentials(env_email="e@x", env_password="p", keyring_module=kr)
-    assert creds is not None
-    assert creds.source == "env"
-    assert creds.email == "e@x"
+    assert load_credentials(keyring_module=kr) is None
 
 
-def test_none_when_both_sources_empty() -> None:
-    kr = FakeKeyring()
-    assert load_credentials(env_email=None, env_password=None, keyring_module=kr) is None
-    assert load_credentials(env_email="", env_password="", keyring_module=kr) is None
-
-
-def test_partial_keychain_falls_back_to_env() -> None:
-    """A half-seeded Keychain must not be mixed with env values."""
+def test_partial_keychain_is_treated_as_absent() -> None:
+    """Half-seeded Keychain (e.g. email without password) must return None."""
     kr = FakeKeyring()
     kr.set_password(KEYCHAIN_SERVICE, "email", "k@x")  # password missing
-    creds = load_credentials(
-        env_email="env@x", env_password="envpw", keyring_module=kr
-    )
-    assert creds is not None
-    assert creds.source == "env"
-    assert creds.email == "env@x"
+    assert load_credentials(keyring_module=kr) is None
 
 
-def test_keychain_exception_logs_and_falls_back() -> None:
+def test_keychain_read_exception_returns_none() -> None:
+    """Locked / broken keyring should degrade to None rather than raising."""
     kr = FakeKeyring(get_raises=RuntimeError("keychain locked"))
-    creds = load_credentials(env_email="e@x", env_password="p", keyring_module=kr)
-    assert creds is not None
-    assert creds.source == "env"
+    assert load_credentials(keyring_module=kr) is None
 
 
 def test_save_rejects_empty_values() -> None:
@@ -89,12 +71,12 @@ def test_clear_is_idempotent() -> None:
     clear_credentials(keyring_module=kr)  # no entries → silent no-op
     save_credentials("e@x", "p", keyring_module=kr)
     clear_credentials(keyring_module=kr)
-    assert load_credentials(env_email=None, env_password=None, keyring_module=kr) is None
+    assert load_credentials(keyring_module=kr) is None
 
 
 def test_save_then_clear_roundtrip() -> None:
     kr = FakeKeyring()
     save_credentials("e@x", "p", keyring_module=kr)
-    assert load_credentials(env_email=None, env_password=None, keyring_module=kr) is not None
+    assert load_credentials(keyring_module=kr) is not None
     clear_credentials(keyring_module=kr)
-    assert load_credentials(env_email=None, env_password=None, keyring_module=kr) is None
+    assert load_credentials(keyring_module=kr) is None

@@ -1,8 +1,10 @@
 """macOS menubar frontend — a thin rumps wrapper around the daemon HTTP API.
 
-This module knows nothing about LibreLinkUp, credentials, regions, or
-trend codes. It maps daemon ``Status`` values to menubar glyphs and shows
-the current value when the status allows it. That's the whole job.
+This module maps daemon ``Status`` values to menubar glyphs and shows the
+current value when the status allows it. It also owns the LibreView
+credentials UX: on first launch (Keychain is empty) it prompts the user
+and seeds the Keychain, and the **LibreView Account** menu item lets
+them update the stored credentials later.
 
 Run::
 
@@ -14,6 +16,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -26,7 +29,6 @@ import objc
 import rumps
 from rumps import events as rumps_events
 from AppKit import (
-    NSAlert,
     NSApp,
     NSAttributedString,
     NSBackingStoreBuffered,
@@ -98,34 +100,46 @@ _PULSE_TICK_S = 0.1
 _PULSE_MIN_ALPHA = 0.45
 _ARROW_PULSE_SYMBOLS = frozenset({"↓", "↘", "↗", "↑"})
 
+# How long to wait after the AppKit runloop starts before popping the
+# first-run credentials modal. Short enough that a fresh user never
+# notices they saw the menubar first, long enough that the runloop
+# has done one event pass so ``runModalForWindow_`` renders cleanly.
+_FIRST_RUN_PROMPT_DELAY_S = 0.3
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 log = logging.getLogger("glucose.frontend")
 
-# Dialog strategy: native NSAlert when bundled, osascript fallback otherwise.
+# Dialog strategy: native ``NSPanel`` modals when bundled, osascript
+# fallback otherwise.
 #
 # When launched from launchd via the ``Glucobar.app`` wrapper bundle
 # (see ``scripts/app_bundle/``), AppKit sees a real
 # ``CFBundleIdentifier`` and ``LSUIElement`` and modal dialogs work
-# correctly — so we show a single ``NSAlert`` with a two-field
-# accessory view for credentials, which is the UX the user asked for.
+# correctly — so we show a titled ``NSPanel`` with two fields for
+# credentials (email + password in a single modal) and a matching
+# single-OK ``NSPanel`` for informational alerts. We deliberately avoid
+# ``NSAlert`` here: it always reserves space for the app icon and
+# paints the generic Python launcher glyph until we ship a real
+# ``Glucobar.icns``.
 #
 # When running unbundled (e.g. ``python -m macos_frontend`` from a
 # terminal during development), the Python process has no bundle
 # identity. Several AppKit UI APIs refuse to work in that context —
-# ``NSAlert.runModal`` / ``rumps.Window.run`` behave similarly: the call
-# appears to start, but AppKit silently marks the process as misbehaving
-# and ``launchd`` tears it down a few seconds later. There's no crash report,
-# just a clean exit and a relaunch — which from the user's perspective looks
-# like "the menu went dead and nothing happened". In that mode we fall back to
-# ``osascript``, which shells out to a properly bundled helper process
-# (``System Events``) to host the dialog.
+# ``runModalForWindow_`` / ``rumps.Window.run`` behave similarly:
+# the call appears to start, but AppKit silently marks the process
+# as misbehaving and ``launchd`` tears it down a few seconds later.
+# There's no crash report, just a clean exit and a relaunch — which
+# from the user's perspective looks like "the menu went dead and
+# nothing happened". In that mode we fall back to ``osascript``,
+# which shells out to a properly bundled helper process (``System
+# Events``) to host the dialog.
 #
 # Either way, the dialog flow runs on a background thread so the
 # rumps menu callback returns immediately (otherwise the menu stays
-# wedged in its tracking session). The native-NSAlert path uses
+# wedged in its tracking session). The native path uses
 # ``performSelectorOnMainThread:`` to marshal the actual UI call back
 # to the main thread.
 
@@ -227,7 +241,7 @@ def _run_in_background(fn) -> None:
 # --- bundled-mode detection ------------------------------------------------
 #
 # When launched via the ``Glucobar.app`` wrapper bundle, AppKit sees a real
-# ``CFBundleIdentifier`` and ``NSAlert.runModal()`` works correctly.
+# ``CFBundleIdentifier`` and ``NSPanel`` modals work correctly.
 # When launched directly (``python -m macos_frontend`` during development),
 # the same calls can silently tear down the process — so we fall back to
 # the osascript two-dialog flow.
@@ -245,7 +259,7 @@ def _is_bundled() -> bool:
 
 # --- main-thread dispatch --------------------------------------------------
 #
-# AppKit UI calls (NSAlert.runModal, NSApp.activateIgnoringOtherApps_, etc.)
+# AppKit UI calls (NSApp.runModalForWindow_, NSApp.activateIgnoringOtherApps_, etc.)
 # must happen on the main thread. The dialog flow runs on a background
 # thread (so the rumps menu callback returns immediately and the menu
 # doesn't stay wedged in its tracking session), so we need a way to ask
@@ -292,23 +306,78 @@ def _run_on_main_and_wait(fn):
 # --- native two-field credentials dialog -----------------------------------
 
 # Must match the menubar item label (also used as the credentials window title).
-_LIBRELINKUP_ACCOUNT_TITLE = "LibreLinkUp Account"
+_LIBREVIEW_ACCOUNT_TITLE = "LibreView Account"
+
+# launchd labels for the frontend LaunchAgent (still in use for the
+# "Run at Startup" menu item) and, for legacy upgrades, the pre-0.3
+# separate daemon LaunchAgent. The daemon now runs as a child process
+# of the frontend under :mod:`macos_frontend.daemon_supervisor`, so we
+# never install ``com.glucobar.daemon`` from 0.3+ onward.
+_FRONTEND_LAUNCHD_LABEL = "com.glucobar.frontend"
+_FRONTEND_STARTUP_TITLE = "Run at Startup / Login"
+_FRONTEND_PLIST_PATH = Path.home() / "Library/LaunchAgents/com.glucobar.frontend.plist"
 
 
 def _credentials_dialog_prefill() -> tuple[str, str]:
-    """Best-known email and password for the account dialog (Keychain, then ``.env``).
-
-    Password is only returned when it comes from the same source as the email
-    (see :func:`load_credentials` — no mixing Keychain email with env password).
-    """
-    env_email = (os.environ.get("LIBRELINKUP_EMAIL") or "").strip() or None
-    env_password = os.environ.get("LIBRELINKUP_PASSWORD") or None
-    loaded = load_credentials(env_email, env_password)
+    """Email + password currently in the Keychain, or empty strings if none."""
+    loaded = load_credentials()
     if loaded is not None:
         return loaded.email.strip(), loaded.password
-    if env_email:
-        return env_email, env_password or ""
     return "", ""
+
+
+def _kickstart_daemon() -> None:
+    """Ask the daemon to restart so it picks up new credentials.
+
+    Delegates to :func:`macos_frontend.daemon_supervisor.request_restart`,
+    which prefers the active in-process supervisor and falls back to
+    ``launchctl kickstart`` for legacy deployments. Both paths are
+    best-effort: a failure here just means the daemon picks up new
+    state on its next natural restart instead of immediately.
+    """
+    from macos_frontend.daemon_supervisor import request_restart
+    request_restart()
+
+
+def _launchctl(*args: str) -> subprocess.CompletedProcess[str]:
+    """Run launchctl with stdout/stderr captured."""
+    return subprocess.run(
+        ["/bin/launchctl", *args],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+
+def _frontend_startup_enabled() -> bool:
+    """Return whether launchd startup is enabled for the frontend."""
+    if not _FRONTEND_PLIST_PATH.exists():
+        return False
+
+    uid = os.getuid()
+    disabled_target = f"gui/{uid}"
+    try:
+        disabled_proc = _launchctl("print-disabled", disabled_target)
+    except Exception:  # noqa: BLE001
+        log.exception("launchctl print-disabled failed")
+        return False
+
+    if disabled_proc.returncode == 0:
+        # launchctl output shape: "... com.glucobar.frontend => true/false".
+        disabled_match = re.search(
+            rf"{re.escape(_FRONTEND_LAUNCHD_LABEL)}\s*=>\s*(true|false)",
+            disabled_proc.stdout or "",
+        )
+        if disabled_match is not None:
+            return disabled_match.group(1) == "false"
+
+    # Fallback: treat a loaded label as enabled.
+    print_target = f"{disabled_target}/{_FRONTEND_LAUNCHD_LABEL}"
+    try:
+        return _launchctl("print", print_target).returncode == 0
+    except Exception:  # noqa: BLE001
+        log.exception("launchctl print failed for %s", print_target)
+        return False
 
 
 class _CredentialsDialogController(NSObject):
@@ -329,6 +398,11 @@ def _native_credentials_dialog(
     *,
     current_email: str = "",
     current_password: str = "",
+    title: str = _LIBREVIEW_ACCOUNT_TITLE,
+    body_text: str = (
+        "Your email and password are stored securely in your Mac Keychain."
+    ),
+    save_button: str = "Save",
 ) -> tuple[bool, str, str]:
     """Show a titled modal panel with email + password fields.
 
@@ -338,6 +412,11 @@ def _native_credentials_dialog(
     Returns ``(clicked_ok, email, password)``. Must run on the main
     thread — dispatch via :func:`_run_on_main_and_wait` from worker
     threads.
+
+    ``title`` / ``body_text`` / ``save_button`` default to the
+    everyday "LibreView Account" framing used by the menu; the
+    first-run onboarding path overrides them to welcome the user
+    before they've signed in.
     """
     field_width = 320
     h_padding = 20
@@ -346,9 +425,7 @@ def _native_credentials_dialog(
     # smaller clips the baseline of the caret.
     row_height = 22
 
-    body = NSTextField.wrappingLabelWithString_(
-        "Your email and password are stored securely in your Mac Keychain."
-    )
+    body = NSTextField.wrappingLabelWithString_(body_text)
     body.setFont_(NSFont.systemFontOfSize_(NSFont.systemFontSize()))
     body.setTranslatesAutoresizingMaskIntoConstraints_(False)
 
@@ -369,7 +446,7 @@ def _native_credentials_dialog(
 
     controller = _CredentialsDialogController.alloc().init()
     save_btn = NSButton.buttonWithTitle_target_action_(
-        "Save", controller, "save:"
+        save_button, controller, "save:"
     )
     # "\r" gives the button the system default-blue style and wires
     # Return to trigger it; "\x1b" wires Cancel to the Escape key.
@@ -427,7 +504,7 @@ def _native_credentials_dialog(
         NSBackingStoreBuffered,
         False,
     )
-    panel.setTitle_(_LIBRELINKUP_ACCOUNT_TITLE)
+    panel.setTitle_(title)
     panel.setContentView_(content)
     # Default behaviour closes the window on Cmd-W and releases it, which
     # would dangle a freed pointer across subsequent runModal cycles.
@@ -454,6 +531,104 @@ def _native_credentials_dialog(
     return (ok, email_field.stringValue() or "", password_field.stringValue() or "")
 
 
+class _InfoAlertController(NSObject):
+    """Routes the single OK button back to ``NSApp.stopModal``."""
+
+    def ok_(self, _sender):  # noqa: N802 — Obj-C selector name.
+        NSApp.stopModalWithCode_(1)
+
+
+def _native_info_alert(*, title: str, message: str) -> None:
+    """Show a single-OK informational modal with no icon slot.
+
+    ``NSAlert`` always reserves horizontal space for the app icon and
+    paints the bundle's ``NSApplicationIcon`` (or the generic Python
+    launcher icon when we haven't shipped one yet). That looks
+    off-brand on success/error messages, so we use an ``NSPanel``
+    here — the same trick the credentials dialog already uses to
+    dodge the icon slot. A bold title sits above the wrapping body,
+    and a single OK button doubles as Return/Escape dismiss.
+
+    Must run on the main thread; dispatch from a worker via
+    :func:`_run_on_main_and_wait`.
+    """
+    content_width = 320
+    h_padding = 20
+    v_padding = 20
+
+    title_label = NSTextField.wrappingLabelWithString_(title)
+    title_label.setFont_(NSFont.boldSystemFontOfSize_(NSFont.systemFontSize()))
+    title_label.setTranslatesAutoresizingMaskIntoConstraints_(False)
+
+    body = NSTextField.wrappingLabelWithString_(message)
+    body.setFont_(NSFont.systemFontOfSize_(NSFont.systemFontSize()))
+    body.setTranslatesAutoresizingMaskIntoConstraints_(False)
+
+    controller = _InfoAlertController.alloc().init()
+    ok_btn = NSButton.buttonWithTitle_target_action_("OK", controller, "ok:")
+    # "\r" makes Return activate the button (also gives it the blue
+    # default-button styling); "\x1b" wires Escape to the same action
+    # so single-button alerts can be dismissed with either key.
+    ok_btn.setKeyEquivalent_("\r")
+    ok_btn.setTranslatesAutoresizingMaskIntoConstraints_(False)
+
+    content = NSView.alloc().init()
+    content.addSubview_(title_label)
+    content.addSubview_(body)
+    content.addSubview_(ok_btn)
+
+    NSLayoutConstraint.activateConstraints_([
+        title_label.leadingAnchor().constraintEqualToAnchor_constant_(
+            content.leadingAnchor(), h_padding
+        ),
+        title_label.trailingAnchor().constraintEqualToAnchor_constant_(
+            content.trailingAnchor(), -h_padding
+        ),
+        title_label.topAnchor().constraintEqualToAnchor_constant_(
+            content.topAnchor(), v_padding
+        ),
+        body.leadingAnchor().constraintEqualToAnchor_(title_label.leadingAnchor()),
+        body.trailingAnchor().constraintEqualToAnchor_(title_label.trailingAnchor()),
+        body.topAnchor().constraintEqualToAnchor_constant_(
+            title_label.bottomAnchor(), 8
+        ),
+        ok_btn.trailingAnchor().constraintEqualToAnchor_(title_label.trailingAnchor()),
+        ok_btn.topAnchor().constraintEqualToAnchor_constant_(
+            body.bottomAnchor(), 16
+        ),
+        ok_btn.bottomAnchor().constraintEqualToAnchor_constant_(
+            content.bottomAnchor(), -v_padding
+        ),
+    ])
+
+    panel = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
+        NSMakeRect(0, 0, content_width + 2 * h_padding, 160),
+        NSWindowStyleMaskTitled,
+        NSBackingStoreBuffered,
+        False,
+    )
+    # Empty string rather than ``title`` — the bold label inside the
+    # panel already carries the heading; duplicating it in the window
+    # chrome just reads as noise.
+    panel.setTitle_("")
+    panel.setContentView_(content)
+    panel.setReleasedWhenClosed_(False)
+    panel.setInitialFirstResponder_(ok_btn)
+    panel.layoutIfNeeded()
+    panel.center()
+
+    try:
+        NSApp.activateIgnoringOtherApps_(True)
+    except Exception:  # noqa: BLE001
+        pass
+
+    panel.makeKeyAndOrderFront_(None)
+    try:
+        NSApp.runModalForWindow_(panel)
+    finally:
+        panel.orderOut_(None)
+
+
 # Menubar title for each non-``ok`` daemon status. When status == "ok"
 # (or "stale" with a last-known value) we render the number directly.
 #
@@ -473,7 +648,7 @@ def _native_credentials_dialog(
 #   layer (wrong credentials *or* an unaccepted Terms-of-Service prompt
 #   in the FreeStyle LibreLink phone app). Both paths funnel the user
 #   toward the same two menu items (``Refresh`` and
-#   ``LibreLinkUp Account``) so distinguishing them in the title would
+#   ``LibreView Account``) so distinguishing them in the title would
 #   only add noise.
 # * ``⚠ Error`` — unexpected/unhandled failures.
 #
@@ -640,6 +815,7 @@ class _StatusItemMenuPresenter(NSObject):
         # advance once per ``poll_interval`` and the row could read e.g.
         # "(Just now)" while disabled long after the reading went stale.
         app._update_refresh_item()
+        app._update_startup_item()
         ns_menu = app._menu._menu
         button = sender
         ns_menu.sizeToFit()
@@ -680,7 +856,10 @@ class GlucoseApp(rumps.App):
         # which only refreshes once per poll.
         self._last_sensor_dt: datetime | None = None
         self._creds_item = rumps.MenuItem(
-            _LIBRELINKUP_ACCOUNT_TITLE, callback=self._on_edit_credentials
+            _LIBREVIEW_ACCOUNT_TITLE, callback=self._on_edit_credentials
+        )
+        self._startup_item = rumps.MenuItem(
+            _FRONTEND_STARTUP_TITLE, callback=self._on_toggle_startup
         )
 
         # The menubar title carries the full status story (number, trend
@@ -701,8 +880,10 @@ class GlucoseApp(rumps.App):
             self._graph_item,
             self._refresh_item,
             None,
+            self._startup_item,
             self._creds_item,
         ]
+        self._update_startup_item()
 
         self._client = DaemonClient(base_url=base_url)
 
@@ -734,6 +915,21 @@ class GlucoseApp(rumps.App):
         rumps_events.before_start.register(self._install_number_aligned_status_menu)
         self._timer.start()
         self._on_tick(None)
+
+        # First-run onboarding: if the Keychain is empty, pop the
+        # two-field credentials modal as soon as the AppKit runloop
+        # is live. ``NSApp.runModalForWindow_`` needs a running
+        # NSApplication — we can't open it from ``main()`` before
+        # ``app.run()``. A one-shot ``rumps.Timer`` with a tiny
+        # interval defers the call until after ``NSApp.run()`` is
+        # pumping events, which is the earliest moment the modal
+        # can render cleanly.
+        self._first_run_timer: rumps.Timer | None = None
+        if load_credentials() is None:
+            self._first_run_timer = rumps.Timer(
+                self._on_first_run_tick, _FIRST_RUN_PROMPT_DELAY_S
+            )
+            self._first_run_timer.start()
 
     def _install_number_aligned_status_menu(self, *_unused) -> None:
         delegate = self._nsapp
@@ -1049,7 +1245,7 @@ class GlucoseApp(rumps.App):
         try:
             self._client.force_refresh()
         except Exception as e:  # noqa: BLE001
-            log.warning("LibreLinkUp session refresh failed: %s", e)
+            log.warning("LibreView session refresh failed: %s", e)
         self._on_tick(None)
 
     def _on_refresh(self, _sender) -> None:
@@ -1059,11 +1255,146 @@ class GlucoseApp(rumps.App):
         log.info("Update credentials clicked")
         _run_in_background(self._edit_credentials_impl)
 
+    def _on_first_run_tick(self, _timer) -> None:
+        """Fire once, on the main thread, shortly after NSApp starts.
+
+        Stops the timer immediately — it's a one-shot — then pops
+        the same two-field credentials modal the menu uses, with
+        onboarding copy. Rechecks the Keychain first because the
+        user could in principle have seeded credentials out-of-band
+        (``scripts/set_credentials.py``) between ``__init__`` and
+        the first tick.
+        """
+        if self._first_run_timer is not None:
+            self._first_run_timer.stop()
+            self._first_run_timer = None
+        if load_credentials() is not None:
+            return
+        log.info("No LibreView credentials in Keychain; showing onboarding modal")
+        _run_in_background(self._first_run_credentials_impl)
+
+    def _first_run_credentials_impl(self) -> None:
+        """Run the onboarding credentials flow on a worker thread.
+
+        Same code path as :meth:`_edit_credentials_impl` — the only
+        differences are the dialog's title/body/button copy (welcome
+        framing) and the success alert (a friendly "you're signed
+        in" message rather than the generic edit confirmation).
+        """
+        ok, email, password = _run_on_main_and_wait(
+            lambda: _native_credentials_dialog(
+                current_email="",
+                current_password="",
+                title="Welcome to Glucobar",
+                body_text=(
+                    "Sign in with your LibreView account so Glucobar can read "
+                    "your glucose readings. Your email and password are stored "
+                    "securely in your Mac Keychain and never sent anywhere else."
+                ),
+                save_button="Sign In",
+            )
+        )
+        if not ok:
+            log.info("First-run credentials prompt cancelled")
+            return
+        email = email.strip()
+        if not email or not password:
+            self._show_alert(
+                title="Sign-in incomplete",
+                message=(
+                    "Glucobar needs both your email and your LibreView "
+                    f"password. Open {_LIBREVIEW_ACCOUNT_TITLE} from the "
+                    "menu when you're ready to try again."
+                ),
+            )
+            return
+        try:
+            save_credentials(email=email, password=password)
+        except Exception as e:  # noqa: BLE001
+            log.exception("Could not save first-run credentials")
+            self._show_alert(
+                title="Couldn't save sign-in",
+                message=(
+                    f"{e}\n\nGlucobar couldn't write to your Mac Keychain. "
+                    f"Open {_LIBREVIEW_ACCOUNT_TITLE} from the menu to try "
+                    "again."
+                ),
+            )
+            return
+        log.info("Saved LibreView credentials from first-run prompt")
+        # Daemon is in the supervisor's sticky EX_CONFIG state; nudge
+        # it so it respawns now with the new Keychain entry instead of
+        # waiting for the user to poke the menu.
+        _kickstart_daemon()
+        self._show_alert(
+            title="You're signed in",
+            message=(
+                "Glucobar is connecting to LibreView with your account now. "
+                "Your first glucose reading should appear in the menubar "
+                "shortly."
+            ),
+        )
+
+    def _update_startup_item(self) -> None:
+        enabled = _frontend_startup_enabled()
+        self._startup_item._menuitem.setState_(1 if enabled else 0)
+
+    def _on_toggle_startup(self, _sender) -> None:
+        _run_in_background(self._toggle_startup_impl)
+
+    def _toggle_startup_impl(self) -> None:
+        uid = os.getuid()
+        target = f"gui/{uid}/{_FRONTEND_LAUNCHD_LABEL}"
+        enabled = _frontend_startup_enabled()
+        if enabled:
+            try:
+                proc = _launchctl("disable", target)
+            except Exception as e:  # noqa: BLE001
+                self._show_alert(
+                    title="Couldn't update startup setting",
+                    message=f"{e}",
+                )
+                return
+            if proc.returncode != 0:
+                self._show_alert(
+                    title="Couldn't update startup setting",
+                    message=(proc.stderr or proc.stdout or "launchctl disable failed").strip(),
+                )
+                return
+            self._update_startup_item()
+            return
+
+        if not _FRONTEND_PLIST_PATH.exists():
+            self._show_alert(
+                title="Startup agent not installed",
+                message=(
+                    "LaunchAgent file not found at:\n"
+                    f"{_FRONTEND_PLIST_PATH}\n\n"
+                    "Run scripts/install_launchagent.sh install first."
+                ),
+            )
+            return
+        try:
+            proc = _launchctl("enable", target)
+        except Exception as e:  # noqa: BLE001
+            self._show_alert(
+                title="Couldn't update startup setting",
+                message=f"{e}",
+            )
+            return
+        if proc.returncode != 0:
+            self._show_alert(
+                title="Couldn't update startup setting",
+                message=(proc.stderr or proc.stdout or "launchctl enable failed").strip(),
+            )
+            return
+        self._update_startup_item()
+
     def _edit_credentials_impl(self) -> None:
         """Capture email + password and save to Keychain.
 
         When running inside the ``Glucobar.app`` wrapper bundle we show
-        a single native NSAlert with two fields. When running
+        a single native ``NSPanel`` with two fields. When running
         unbundled (``python -m macos_frontend`` during development),
         AppKit modals can tear the process down, so we fall back to
         the osascript two-dialog flow which delegates UI to a properly
@@ -1089,8 +1420,8 @@ class GlucoseApp(rumps.App):
             self._show_alert(
                 title="Email missing",
                 message=(
-                    "Enter the email for your LibreLinkUp account, then open "
-                    f"{_LIBRELINKUP_ACCOUNT_TITLE} again."
+                    "Enter the email for your LibreView account, then open "
+                    f"{_LIBREVIEW_ACCOUNT_TITLE} again."
                 ),
             )
             return
@@ -1098,8 +1429,8 @@ class GlucoseApp(rumps.App):
             self._show_alert(
                 title="Password missing",
                 message=(
-                    "Enter your LibreLinkUp password, then open "
-                    f"{_LIBRELINKUP_ACCOUNT_TITLE} again."
+                    "Enter your LibreView password, then open "
+                    f"{_LIBREVIEW_ACCOUNT_TITLE} again."
                 ),
             )
             return
@@ -1111,16 +1442,22 @@ class GlucoseApp(rumps.App):
                 title="Couldn't save sign-in",
                 message=(
                     f"{e}\n\n"
-                    "If you're comfortable editing config files, you can set "
-                    "LIBRELINKUP_EMAIL and LIBRELINKUP_PASSWORD in `.env` instead."
+                    "Glucobar only reads LibreView credentials from the macOS "
+                    "Keychain, so they need to land there before the daemon "
+                    "can sign in."
                 ),
             )
             return
+        # Kick the daemon so it re-authenticates with the new credentials
+        # right away, instead of either waiting for its next poll (if
+        # already running under the old creds) or for launchd's throttled
+        # respawn (if it exited on missing-credentials before first run).
+        _kickstart_daemon()
         self._show_alert(
             title="Sign-in saved",
             message=(
                 "Saved to your Mac Keychain. "
-                "Choose “Refresh” from the menu to connect with these details now."
+                "Glucobar is reconnecting with these details now."
             ),
         )
 
@@ -1129,15 +1466,15 @@ class GlucoseApp(rumps.App):
     ) -> tuple[bool, str, str]:
         """Unbundled-mode fallback: two sequential osascript dialogs."""
         ok, email = _osascript_dialog(
-            title="LibreLinkUp email",
-            message="Enter the email you use for LibreLinkUp.",
+            title="LibreView email",
+            message="Enter the email you use for LibreView.",
             default_text=default_email,
             ok="Next",
         )
         if not ok:
             return False, "", ""
         ok, password = _osascript_dialog(
-            title="LibreLinkUp password",
+            title="LibreView password",
             message="This is saved in your Mac Keychain.",
             ok="Save",
             hidden_answer=True,
@@ -1147,20 +1484,20 @@ class GlucoseApp(rumps.App):
         return True, email, password
 
     def _show_alert(self, *, title: str, message: str) -> None:
-        """Show an informational alert, using whichever backend fits the mode."""
-        if _is_bundled():
-            def _impl() -> None:
-                alert = NSAlert.alloc().init()
-                alert.setMessageText_(title)
-                alert.setInformativeText_(message)
-                alert.addButtonWithTitle_("OK")
-                try:
-                    NSApp.activateIgnoringOtherApps_(True)
-                except Exception:  # noqa: BLE001
-                    pass
-                alert.runModal()
+        """Show an informational alert, using whichever backend fits the mode.
 
-            _run_on_main_and_wait(_impl)
+        Bundled mode uses :func:`_native_info_alert` (an ``NSPanel``)
+        instead of ``NSAlert`` so we don't paint the generic Python
+        launcher icon next to every message until we ship a real
+        ``Glucobar.icns``. Unbundled runs still fall back to
+        ``osascript`` — the developer loop doesn't depend on the
+        icon, and ``osascript`` is the most reliable cross-runloop
+        dialog when we're not inside a real ``.app``.
+        """
+        if _is_bundled():
+            _run_on_main_and_wait(
+                lambda: _native_info_alert(title=title, message=message)
+            )
         else:
             _osascript_alert(title=title, message=message)
 
@@ -1170,6 +1507,37 @@ def main() -> int:
     base_url = os.environ.get("DAEMON_URL", "http://127.0.0.1:8765")
     poll_interval = int(os.environ.get("FRONTEND_POLL_SECONDS", "30"))
     thresholds = ColorThresholds.from_env()
+
+    # Start the daemon supervisor before GlucoseApp.__init__. With no
+    # credentials in the Keychain the supervised daemon will exit 78
+    # (EX_CONFIG) on spawn and the supervisor marks its sticky
+    # "config-error" state. The first-run credentials modal runs later
+    # from inside the rumps runloop (see ``_on_first_run_tick``), and
+    # its success path calls ``request_restart()`` which clears the
+    # sticky flag so the daemon respawns with the saved creds.
+    #
+    # ``GLUCOBAR_SUPERVISE_DAEMON=0`` skips the supervisor entirely
+    # for users who prefer the pre-0.3.1 two-LaunchAgent model or
+    # are iterating on the daemon in another terminal and want the
+    # frontend to stay passive.
+    if os.environ.get("GLUCOBAR_SUPERVISE_DAEMON", "1") != "0":
+        from macos_frontend.daemon_supervisor import (
+            DaemonSupervisor,
+            SupervisorConfig,
+            set_active,
+        )
+        supervisor = DaemonSupervisor(SupervisorConfig(base_url=base_url))
+        try:
+            supervisor.start()
+        except Exception:  # noqa: BLE001 — frontend must still start
+            log.exception(
+                "Daemon supervisor failed to start; continuing without one. "
+                "The frontend will keep reconnecting via DAEMON_URL."
+            )
+        else:
+            set_active(supervisor)
+            log.info("Daemon supervisor active in %s mode", supervisor.mode)
+
     log.info(
         "Starting frontend (daemon=%s, poll=%ss, "
         "thresholds: <%g red, %g–%g green, %g–%g yellow, >%g orange)",
