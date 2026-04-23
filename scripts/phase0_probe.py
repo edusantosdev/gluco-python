@@ -34,7 +34,10 @@ from pylibrelinkup import (  # noqa: E402
 )
 
 from glucose_common.credentials import load_credentials  # noqa: E402
-from glucose_common.regions import resolve_libreview_region  # noqa: E402
+from glucose_common.regions import (  # noqa: E402
+    guess_libreview_region,
+    resolve_libreview_region,
+)
 
 
 def main() -> int:
@@ -46,7 +49,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--region",
-        default=os.environ.get("LIBREVIEW_REGION", "US"),
+        default=os.environ.get("LIBREVIEW_REGION", guess_libreview_region()),
         help="LibreView region (US, EU, EU2, AE, AP, AU, CA, DE, FR, JP, LA, RU)",
     )
     args = parser.parse_args()

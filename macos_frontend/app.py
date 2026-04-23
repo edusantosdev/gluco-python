@@ -58,6 +58,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from glucose_common.credentials import (  # noqa: E402
+    clear_credentials,
     load_credentials,
     save_credentials,
 )
@@ -154,9 +155,11 @@ def _run_in_background(fn) -> None:
 
 # --- bundled-mode detection ------------------------------------------------
 #
-# When launched via the ``Glucobar.app`` wrapper bundle, AppKit sees a real
-# ``CFBundleIdentifier`` and ``NSPanel`` modals work correctly.
-# Any non-bundled launch is unsupported and rejected at startup.
+# Any launch outside ``Glucobar.app`` is unsupported and rejected at
+# startup. We accept two "bundled enough" signals:
+#   1) main bundle id matches ``com.glucobar.frontend`` (py2app build)
+#   2) ``sys.executable`` path is inside ``Glucobar.app/Contents/MacOS``
+#      (source-wrapper bundle used by install_launchagent.sh).
 
 _BUNDLE_ID = "com.glucobar.frontend"
 
@@ -165,15 +168,24 @@ def _is_bundled() -> bool:
     try:
         bid = NSBundle.mainBundle().bundleIdentifier()
     except Exception:  # noqa: BLE001
-        return False
-    return bid == _BUNDLE_ID
+        bid = None
+    if bid == _BUNDLE_ID:
+        return True
+    exe = Path(sys.executable)
+    return (
+        exe.name == "Glucobar"
+        and "Glucobar.app" in exe.parts
+        and "Contents" in exe.parts
+        and "MacOS" in exe.parts
+    )
 
 
 def _ensure_bundled_launch() -> None:
     """Fail fast when launched outside ``Glucobar.app``.
 
-    Native AppKit modal flows depend on a real bundle identity; running
-    this module directly is intentionally unsupported.
+    Native AppKit modal flows require being launched from the app wrapper
+    (or a fully packaged bundle); running this module directly is
+    intentionally unsupported.
     """
     if _is_bundled():
         return
@@ -246,7 +258,10 @@ def _run_on_main_and_wait(fn):
 
 # --- native two-field credentials dialog -----------------------------------
 
-# Must match the menubar item label (also used as the credentials window title).
+# Menu row title shown before the gray username suffix.
+_LOGOUT_MENU_PRIMARY_TITLE = "Logout of Libreview account"
+
+# Plain title used when the credentials dialog is opened without custom copy.
 _LIBREVIEW_ACCOUNT_TITLE = "LibreView Account"
 _SIGN_IN_DIALOG_TITLE = "Welcome to Glucobar"
 _SIGN_IN_DIALOG_BODY = (
@@ -274,14 +289,18 @@ def _credentials_dialog_prefill() -> tuple[str, str]:
     return "", ""
 
 
+def _has_stored_credentials() -> bool:
+    """Return True iff both LibreView credentials are present in Keychain."""
+    return load_credentials() is not None
+
+
 def _kickstart_daemon() -> None:
     """Ask the daemon to restart so it picks up new credentials.
 
     Delegates to :func:`macos_frontend.daemon_supervisor.request_restart`,
-    which prefers the active in-process supervisor and falls back to
-    ``launchctl kickstart`` for legacy deployments. Both paths are
-    best-effort: a failure here just means the daemon picks up new
-    state on its next natural restart instead of immediately.
+    which only nudges the active in-process managed supervisor. In
+    external mode this is best-effort and intentionally becomes a no-op:
+    the daemon picks up new state on its next natural restart.
     """
     from macos_frontend.daemon_supervisor import request_restart
     request_restart()
@@ -783,6 +802,7 @@ class _StatusItemMenuPresenter(NSObject):
         # "(Just now)" while disabled long after the reading went stale.
         app._update_refresh_item()
         app._update_startup_item()
+        app._update_credentials_item()
         ns_menu = app._menu._menu
         button = sender
         ns_menu.sizeToFit()
@@ -823,7 +843,7 @@ class GlucoseApp(rumps.App):
         # which only refreshes once per poll.
         self._last_sensor_dt: datetime | None = None
         self._creds_item = rumps.MenuItem(
-            _LIBREVIEW_ACCOUNT_TITLE, callback=self._on_edit_credentials
+            _LOGOUT_MENU_PRIMARY_TITLE, callback=self._on_logout_credentials
         )
         self._startup_item = rumps.MenuItem(
             _FRONTEND_STARTUP_TITLE, callback=self._on_toggle_startup
@@ -851,6 +871,7 @@ class GlucoseApp(rumps.App):
             self._creds_item,
         ]
         self._update_startup_item()
+        self._update_credentials_item()
 
         self._client = DaemonClient(base_url=base_url)
 
@@ -1078,6 +1099,16 @@ class GlucoseApp(rumps.App):
     # --- timer / menu callbacks ---
 
     def _on_tick(self, _sender) -> None:
+        # Enforce a local logged-out state whenever the Keychain is empty,
+        # even if an externally-managed daemon still has a live session.
+        if not _has_stored_credentials():
+            self._daemon_unreachable = False
+            self._last_sensor_dt = None
+            self._apply_title_parts("⚠ Sign In", "", "", color=None)
+            self._graph_view.setPoints_([])
+            self._update_refresh_item()
+            self._update_credentials_item()
+            return
         try:
             reading = self._client.current()
         except DaemonNotReady as e:
@@ -1206,6 +1237,36 @@ class GlucoseApp(rumps.App):
         )
         self._refresh_item._menuitem.setAttributedTitle_(attr)
 
+    def _update_credentials_item(self) -> None:
+        """Render logout row as ``Logout ... (email)`` with a dimmed email."""
+        creds = load_credentials()
+        email = creds.email.strip() if creds is not None else ""
+        menu_item = self._creds_item._menuitem
+        if not email:
+            menu_item.setAttributedTitle_(None)
+            self._creds_item.title = _LOGOUT_MENU_PRIMARY_TITLE
+            return
+        self._apply_credentials_attr_title(email)
+
+    def _apply_credentials_attr_title(self, email: str) -> None:
+        primary = _LOGOUT_MENU_PRIMARY_TITLE
+        joiner = " ("
+        closer = ")"
+        full = f"{primary}{joiner}{email}{closer}"
+        attr = NSMutableAttributedString.alloc().initWithString_(full)
+        full_range = (0, len(full))
+        attr.addAttribute_value_range_(
+            NSFontAttributeName, NSFont.menuFontOfSize_(0), full_range
+        )
+        secondary_start = len(primary)
+        secondary_len = len(joiner) + len(email) + len(closer)
+        attr.addAttribute_value_range_(
+            NSForegroundColorAttributeName,
+            NSColor.secondaryLabelColor(),
+            (secondary_start, secondary_len),
+        )
+        self._creds_item._menuitem.setAttributedTitle_(attr)
+
     def _session_refresh_then_tick(self, *, log_label: str) -> None:
         """POST /auth/refresh on the daemon, then pull current reading + graph."""
         log.info("%s", log_label)
@@ -1234,17 +1295,57 @@ class GlucoseApp(rumps.App):
             return reading.status
         return None
 
-    def _on_refresh(self, _sender) -> None:
-        self._session_refresh_then_tick(log_label="Refresh")
+    def _handle_post_sign_in_status(self, status: str | None) -> bool:
+        """Return True when sign-in can be treated as successful."""
+        if status == "auth_failed":
+            self._show_alert(
+                title="Sign-in failed",
+                message=(
+                    "LibreView rejected that email or password. "
+                    "Please check your credentials and try again."
+                ),
+            )
+            return False
+        if status == "tos_required":
+            self._show_alert(
+                title="Action needed in Libre app",
+                message=(
+                    "LibreView requires Terms/Privacy re-acceptance before "
+                    "Glucobar can connect. Open the official Libre app on your "
+                    "phone, accept the prompts, then try again."
+                ),
+            )
+            return False
+        return True
 
-    def _on_edit_credentials(self, _sender) -> None:
-        log.info("Update credentials clicked")
-        if load_credentials() is None:
-            # Keep the dropdown behavior identical to first-run startup:
-            # when no credentials exist, show the same onboarding modal.
+    def _on_refresh(self, _sender) -> None:
+        if not _has_stored_credentials():
+            log.info("Refresh clicked while logged out; opening sign-in flow")
             _run_in_background(self._first_run_credentials_impl)
             return
-        _run_in_background(self._edit_credentials_impl)
+        self._session_refresh_then_tick(log_label="Refresh")
+
+    def _on_logout_credentials(self, _sender) -> None:
+        log.info("Logout clicked")
+        _run_in_background(self._logout_credentials_impl)
+
+    def _logout_credentials_impl(self) -> None:
+        clear_credentials()
+        if load_credentials() is not None:
+            self._show_alert(
+                title="Couldn't log out",
+                message=(
+                    "Glucobar couldn't remove your LibreView credentials from "
+                    "the macOS Keychain. Please unlock Keychain Access and try again."
+                ),
+            )
+            return
+        # Restart the daemon so any in-memory/disk session is dropped now.
+        _kickstart_daemon()
+        self._on_tick(None)
+        self._update_credentials_item()
+        # Reuse the first-run onboarding dialog immediately after logout.
+        self._first_run_credentials_impl()
 
     def _on_first_run_tick(self, _timer) -> None:
         """Fire once, on the main thread, shortly after NSApp starts.
@@ -1312,19 +1413,13 @@ class GlucoseApp(rumps.App):
                 )
                 continue
             log.info("Saved LibreView credentials from first-run prompt")
+            self._update_credentials_item()
             # Daemon is in the supervisor's sticky EX_CONFIG state; nudge
             # it so it respawns now with the new Keychain entry instead of
             # waiting for the user to poke the menu.
             _kickstart_daemon()
             status = self._check_sign_in_status_after_restart()
-            if status == "auth_failed":
-                self._show_alert(
-                    title="Sign-in failed",
-                    message=(
-                        "LibreView rejected that email or password. "
-                        "Please check your credentials and try again."
-                    ),
-                )
+            if not self._handle_post_sign_in_status(status):
                 continue
             self._show_alert(
                 title="You're signed in",
@@ -1439,20 +1534,14 @@ class GlucoseApp(rumps.App):
                     ),
                 )
                 continue
+            self._update_credentials_item()
             # Kick the daemon so it re-authenticates with the new credentials
             # right away, instead of either waiting for its next poll (if
             # already running under the old creds) or for launchd's throttled
             # respawn (if it exited on missing-credentials before first run).
             _kickstart_daemon()
             status = self._check_sign_in_status_after_restart()
-            if status == "auth_failed":
-                self._show_alert(
-                    title="Sign-in failed",
-                    message=(
-                        "LibreView rejected that email or password. "
-                        "Please check your credentials and try again."
-                    ),
-                )
+            if not self._handle_post_sign_in_status(status):
                 continue
             self._show_alert(
                 title="Sign-in saved",

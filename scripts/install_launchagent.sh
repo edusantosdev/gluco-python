@@ -52,10 +52,9 @@ FRONTEND_TMPL="${REPO_ROOT}/scripts/launchagents/${FRONTEND_LABEL}.plist.tmpl"
 APP_BUNDLE_SRC="${REPO_ROOT}/scripts/app_bundle"
 APP_BUNDLE_DST="${REPO_ROOT}/build/Glucobar.app"
 LEGACY_APP_BUNDLE_DST="${REPO_ROOT}/build/Glucose Menubar.app"
-# ``APP_EXECUTABLE`` is the symlinked venv Python inside the bundle.
-# launchd execs it with ``-m macos_frontend``; Launch Services keys the
-# bundle to that executable path, which is what gives AppKit our
-# ``CFBundleIdentifier``.
+# ``APP_EXECUTABLE`` is a real Python binary inside the bundle.
+# launchd execs it with ``-m macos_frontend``; keeping argv[0] inside the
+# .app is what gives AppKit our ``CFBundleIdentifier``.
 APP_EXECUTABLE="${APP_BUNDLE_DST}/Contents/MacOS/Glucobar"
 
 GUI_DOMAIN="gui/$(id -u)"
@@ -124,7 +123,7 @@ build_app_bundle() {
     #       pyvenv.cfg                       (copy of .venv/pyvenv.cfg)
     #       lib/python3.x/site-packages/     (symlink → .venv/...)
     #       MacOS/
-    #         Glucobar                       (symlink → .venv/bin/python)
+    #         Glucobar                       (copied Python launcher)
     local contents="${APP_BUNDLE_DST}/Contents"
     local macos="${contents}/MacOS"
     mkdir -p "${macos}" "${contents}/Resources"
@@ -135,10 +134,13 @@ build_app_bundle() {
         "${APP_BUNDLE_SRC}/Info.plist.tmpl" > "${contents}/Info.plist"
     plutil -lint "${contents}/Info.plist" >/dev/null
 
-    # ``CFBundleExecutable`` in Info.plist is ``Glucobar``; this symlink
-    # is what launchd actually execs, and what Python sees as its own
-    # executable path.
-    ln -sfn "${VENV_PYTHON}" "${macos}/Glucobar"
+    # ``CFBundleExecutable`` in Info.plist is ``Glucobar``; keep a real
+    # executable file in ``Contents/MacOS`` so process path remains inside
+    # the bundle (symlinks can resolve to .venv/bin/python and lose bundle
+    # identity under launchd).
+    rm -f "${macos}/Glucobar"
+    cp -f "${VENV_PYTHON}" "${macos}/Glucobar"
+    chmod 0755 "${macos}/Glucobar"
 
     # Copy pyvenv.cfg so Python's venv site-packages discovery finds
     # it when launched from ``Contents/MacOS/``. We copy instead of

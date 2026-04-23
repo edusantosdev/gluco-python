@@ -7,6 +7,9 @@ those to the correct cluster and optionally emit a hint for logs.
 
 from __future__ import annotations
 
+import os
+import re
+
 from pylibrelinkup import APIUrl
 
 # ISO 3166-1 alpha-2 (and a few colloquial codes) → ``APIUrl`` member name.
@@ -47,6 +50,26 @@ _REGION_ALIASES: dict[str, str] = {
     "SI": "EU",
     "SK": "EU",
 }
+
+
+def guess_libreview_region(default: str = "US") -> str:
+    """Best-effort region token from locale env vars.
+
+    Returns an ISO-like country code (for example ``PT``) when we can
+    infer one from ``LC_ALL`` / ``LC_MESSAGES`` / ``LANG``; otherwise
+    returns ``default``. The caller can then pass this to
+    :func:`resolve_libreview_region` so aliases map to LibreView
+    clusters (for example ``PT`` -> ``EU``).
+    """
+    pattern = re.compile(r"^[A-Za-z]{2}[_-]([A-Za-z]{2})")
+    for key in ("LC_ALL", "LC_MESSAGES", "LANG"):
+        raw = os.environ.get(key, "").strip()
+        if not raw:
+            continue
+        match = pattern.match(raw)
+        if match:
+            return match.group(1).upper()
+    return default
 
 
 def resolve_libreview_region(raw: str) -> tuple[APIUrl, str | None]:

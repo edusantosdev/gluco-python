@@ -54,8 +54,10 @@ full warranty disclaimer.
   password — the same ones you use on libreview.com. You do **not**
   need a separate LibreLinkUp follower account; Glucobar reads the
   connections attached to the main LibreView account it signs in as.
-- The phone's LibreView region must match `LIBREVIEW_REGION` in your
-  `.env` (see [Configuration](#configuration)).
+- The phone's LibreView region must match Glucobar's region setting.
+  By default, Glucobar infers it from your macOS locale (US fallback);
+  you can override with `LIBREVIEW_REGION` in `.env` if needed (see
+  [Configuration](#configuration)).
 
 If your phone is offline, asleep with LibreLink force-quit, or out of
 Bluetooth range for too long, the menubar will fall back to
@@ -74,9 +76,14 @@ Hosted downloadable releases are still on the roadmap (see
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install -e .
-cp .env.example .env
-$EDITOR .env
 scripts/install_launchagent.sh install
+```
+
+Optional (`.env` is not required for first run):
+
+```bash
+cp .env.example .env
+open -e .env
 ```
 
 If you use `zsh` and paste command blocks with `# ...` comment lines, run
@@ -236,12 +243,11 @@ read from env vars or `.env`.
 - LibreView email + password in the Keychain under service name
   `glucobar` — the menubar prompts for these on first launch, or you
   can seed them via `scripts/set_credentials.py`.
-- `LIBREVIEW_REGION` (cluster like `US`, `EU`, `EU2`, `DE`, `FR`, `JP`, `AU`, `CA`, `AE`, `AP`, `LA`, `RU`)
-
-`LIBREVIEW_REGION` also accepts country codes that map to clusters (for example `PT`/`ES`/`GB` -> `EU`).
 
 ### Common Optional
 
+- `LIBREVIEW_REGION` (cluster like `US`, `EU`, `EU2`, `DE`, `FR`, `JP`, `AU`, `CA`, `AE`, `AP`, `LA`, `RU`; default inferred from locale, fallback `US`)
+- `LIBREVIEW_REGION` also accepts country codes that map to clusters (for example `PT`/`ES`/`GB` -> `EU`)
 - `POLL_INTERVAL_SECONDS` (default `60`)
 - `FRONTEND_POLL_SECONDS` (default `30`)
 - `STALE_AFTER_SECONDS` (default `360`)

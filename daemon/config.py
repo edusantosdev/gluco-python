@@ -20,6 +20,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from glucose_common.credentials import load_credentials  # noqa: E402
+from glucose_common.regions import guess_libreview_region  # noqa: E402
 
 
 def _default_state_dir() -> Path:
@@ -39,7 +40,12 @@ class Settings(BaseSettings):
     # can't override the Keychain value.
     libreview_email: str | None = Field(default=None)
     libreview_password: SecretStr | None = Field(default=None)
-    libreview_region: str = Field(default="US", alias="LIBREVIEW_REGION")
+    # If unset, infer from locale (e.g. ``pt_PT`` -> ``PT`` -> EU cluster)
+    # and fall back to US. Explicit env/.env still wins.
+    libreview_region: str = Field(
+        default_factory=guess_libreview_region,
+        alias="LIBREVIEW_REGION",
+    )
 
     poll_interval_seconds: int = Field(default=60, alias="POLL_INTERVAL_SECONDS")
 

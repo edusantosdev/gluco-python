@@ -18,11 +18,10 @@
   icon, no app switcher entry, exactly what we want.
 
   The Python interpreter inherits this bundle identity because
-  launchd execs the symlink at ``Contents/MacOS/Glucobar`` (which
-  points at the venv's Python) — Launch Services infers the
-  containing ``.app`` from that executable path, and Python finds
-  ``pyvenv.cfg`` one directory up under ``Contents/`` so the venv's
-  ``site-packages`` is still on ``sys.path``.
+  launchd execs ``Contents/MacOS/Glucobar`` directly as a real file
+  inside the bundle. Python finds ``pyvenv.cfg`` one directory up
+  under ``Contents/`` so the venv's ``site-packages`` is still on
+  ``sys.path``.
 -->
 <plist version="1.0">
 <dict>
@@ -49,8 +48,8 @@
 
     <!--
       The executable name must match a real file in ``Contents/MacOS/``.
-      The install script creates ``Contents/MacOS/Glucobar`` as a
-      symlink to the venv's Python, so ``CFBundleExecutable`` matches.
+      The install script creates ``Contents/MacOS/Glucobar`` as an
+      executable Python launcher, so ``CFBundleExecutable`` matches.
       When launchd spawns it with ``-m macos_frontend``, Python finds
       ``pyvenv.cfg`` at ``Contents/`` and picks up the venv.
     -->
