@@ -7,7 +7,7 @@ Release automation lives in `.github/workflows/release.yml`.
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install -e .[dev,build]
+.venv/bin/python -m pip install -e '.[dev,build]'
 .venv/bin/python -m pytest tests/
 .venv/bin/python -m ruff check .
 scripts/build_portable_app.sh

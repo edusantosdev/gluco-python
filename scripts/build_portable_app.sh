@@ -22,15 +22,28 @@ trap cleanup EXIT
 
 if [ ! -x "${PYTHON}" ]; then
     echo "error: ${PYTHON} not found. Create the venv first:" >&2
-    echo "  python3 -m venv .venv && .venv/bin/python -m pip install -e .[dev,build]" >&2
+    echo "  python3 -m venv .venv && .venv/bin/python -m pip install -e '.[dev,build]'" >&2
     exit 1
 fi
 
 echo "Installing build dependencies (py2app)..."
 "${PYTHON}" -m pip install -e "${REPO_ROOT}[build]" >/dev/null
 
+ICON_ICNS="${REPO_ROOT}/scripts/app_bundle/GlucoBar.icns"
+if [ ! -f "${ICON_ICNS}" ]; then
+    echo "Generating ${ICON_ICNS}..."
+    "${PYTHON}" "${REPO_ROOT}/scripts/build_glucobar_icns.py"
+fi
+
 echo "Building standalone app (py2app)..."
-rm -rf build dist
+# Stage the bundle under ``build/`` so we never delete all of ``dist/``
+# (release zips and other artifacts often sit there). Only replace
+# ``dist/GlucoBar.app``. Use ``/bin/rm`` so a user ``rm`` alias cannot
+# break cleanup.
+/bin/rm -rf "${REPO_ROOT}/build/py2app"
+STAGING_APP_OUT="${REPO_ROOT}/build/py2app_app_out"
+/bin/rm -rf "${STAGING_APP_OUT}"
+mkdir -p "${STAGING_APP_OUT}"
 
 # py2app currently does not play well with PEP 621 metadata that maps
 # dependencies to ``install_requires`` in the active project's
@@ -46,6 +59,7 @@ OPTIONS = {
     "argv_emulation": False,
     "strip": False,
     "optimize": 1,
+    "iconfile": "${ICON_ICNS}",
     "packages": [
         "daemon",
         "glucose_common",
@@ -67,6 +81,10 @@ OPTIONS = {
         "CFBundleShortVersionString": "0.3.0",
         "LSUIElement": True,
         "NSHighResolutionCapable": True,
+        "CFBundleIconFile": "GlucoBar",
+        "NSHumanReadableCopyright": (
+            "Copyright © 2026 Eduardo Santos. Apache-2.0. Not a medical device."
+        ),
     },
 }
 
@@ -79,9 +97,22 @@ EOF
 (
     cd "${TMP_SETUP_DIR}"
     PYTHONPATH="${REPO_ROOT}" "${PYTHON}" setup.py py2app \
-        --dist-dir "${REPO_ROOT}/dist" \
+        --dist-dir "${STAGING_APP_OUT}" \
         --bdist-base "${REPO_ROOT}/build/py2app"
 )
+
+STAGED_BUNDLE="${STAGING_APP_OUT}/GlucoBar.app"
+if [ ! -d "${STAGED_BUNDLE}" ]; then
+    echo "error: py2app did not produce ${STAGED_BUNDLE}" >&2
+    exit 1
+fi
+mkdir -p "${REPO_ROOT}/dist"
+if [ -e "${REPO_ROOT}/dist/GlucoBar.app" ]; then
+    chmod -R u+w "${REPO_ROOT}/dist/GlucoBar.app" 2>/dev/null || true
+    /bin/rm -rf "${REPO_ROOT}/dist/GlucoBar.app"
+fi
+mv "${STAGED_BUNDLE}" "${REPO_ROOT}/dist/"
+/bin/rm -rf "${STAGING_APP_OUT}"
 
 APP_BUNDLE="${REPO_ROOT}/dist/GlucoBar.app"
 MACOS_DIR="${APP_BUNDLE}/Contents/MacOS"

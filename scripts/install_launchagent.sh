@@ -134,6 +134,13 @@ build_app_bundle() {
         "${APP_BUNDLE_SRC}/Info.plist.tmpl" > "${contents}/Info.plist"
     plutil -lint "${contents}/Info.plist" >/dev/null
 
+    if [ -f "${APP_BUNDLE_SRC}/GlucoBar.icns" ]; then
+        cp -f "${APP_BUNDLE_SRC}/GlucoBar.icns" "${contents}/Resources/"
+    else
+        echo "warn: ${APP_BUNDLE_SRC}/GlucoBar.icns missing; run:" >&2
+        echo "  .venv/bin/python scripts/build_glucobar_icns.py" >&2
+    fi
+
     # ``CFBundleExecutable`` in Info.plist is ``GlucoBar``; keep a real
     # executable file in ``Contents/MacOS`` so process path remains inside
     # the bundle (symlinks can resolve to .venv/bin/python and lose bundle

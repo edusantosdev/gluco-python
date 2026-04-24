@@ -28,6 +28,8 @@ from pathlib import Path
 import objc
 import rumps
 from AppKit import (
+    NSAboutPanelOptionApplicationName,
+    NSAboutPanelOptionCredits,
     NSApp,
     NSApplication,
     NSApplicationActivationPolicyAccessory,
@@ -39,6 +41,7 @@ from AppKit import (
     NSFontAttributeName,
     NSForegroundColorAttributeName,
     NSLayoutConstraint,
+    NSLinkAttributeName,
     NSMakeRect,
     NSMutableAttributedString,
     NSPanel,
@@ -48,7 +51,7 @@ from AppKit import (
     NSWindowStyleMaskTitled,
 )
 from dotenv import load_dotenv
-from Foundation import NSBundle, NSMinY, NSObject, NSPoint
+from Foundation import NSURL, NSBundle, NSMinY, NSObject, NSPoint
 from rumps import events as rumps_events
 
 # Keep repo root importable when launched from the app wrapper.
@@ -109,6 +112,13 @@ _THRESHOLD_LOW_MG_DL = 70.0
 _THRESHOLD_HIGH_MG_DL = 180.0
 _THRESHOLD_VERY_HIGH_MG_DL = 250.0
 
+_ABOUT_TAGLINE = (
+    "GlucoBar is a macOS menubar app that shows your current LibreView glucose "
+    "value and trend."
+)
+_AUTHOR_NAME = "Eduardo Santos"
+_REPO_URL = "https://github.com/eduardo/librelinkup-glucose-menubar-python"
+
 # How long to wait after the AppKit runloop starts before popping the
 # first-run credentials modal. Short enough that a fresh user never
 # notices they saw the menubar first, long enough that the runloop
@@ -138,14 +148,51 @@ log = logging.getLogger("glucose.frontend")
 # credentials (email + password in a single modal) and a matching
 # single-OK ``NSPanel`` for informational alerts. We deliberately avoid
 # ``NSAlert`` here: it always reserves space for the app icon and
-# paints the generic Python launcher glyph until we ship a real
-# ``GlucoBar.icns``.
+# duplicates headings we already draw inside the content. ``NSPanel``
+# keeps credentials and info dialogs visually aligned.
 #
 # Dialog flow runs on a background thread so the
 # rumps menu callback returns immediately (otherwise the menu stays
 # wedged in its tracking session). We use
 # ``performSelectorOnMainThread:`` to marshal the actual UI call back
 # to the main thread.
+
+
+def _about_credits_attributed_string() -> NSMutableAttributedString:
+    """Credits text for the system About panel (includes tappable repo link)."""
+    body = (
+        f"{_ABOUT_TAGLINE}\n\n"
+        f"Author\n{_AUTHOR_NAME}\n\n"
+        "Repository\n"
+        f"{_REPO_URL}\n\n"
+        "License\n"
+        "Apache License 2.0. See the LICENSE and NOTICE files in the source repository.\n\n"
+        "Disclaimer\n"
+        "GlucoBar is not a medical device and is not for diagnosis or treatment decisions. "
+        "It is an independent open-source project and is not affiliated with Abbott."
+    )
+    attr = NSMutableAttributedString.alloc().initWithString_(body)
+    start = body.find(_REPO_URL)
+    if start >= 0:
+        attr.addAttribute_value_range_(
+            NSLinkAttributeName,
+            NSURL.URLWithString_(_REPO_URL),
+            (start, len(_REPO_URL)),
+        )
+    return attr
+
+
+def _show_about_panel() -> None:
+    """Open the standard About window (app icon comes from ``CFBundleIconFile``)."""
+    opts = {
+        NSAboutPanelOptionApplicationName: "GlucoBar",
+        NSAboutPanelOptionCredits: _about_credits_attributed_string(),
+    }
+    NSApp.orderFrontStandardAboutPanelWithOptions_(opts)
+    try:
+        NSApp.activateIgnoringOtherApps_(True)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _run_in_background(fn) -> None:
@@ -559,8 +606,7 @@ def _native_info_alert(*, title: str, message: str) -> None:
     """Show a single-OK informational modal with no icon slot.
 
     ``NSAlert`` always reserves horizontal space for the app icon and
-    paints the bundle's ``NSApplicationIcon`` (or the generic Python
-    launcher icon when we haven't shipped one yet). That looks
+    paints the bundle's ``NSApplicationIcon``. That looks
     off-brand on success/error messages, so we use an ``NSPanel``
     here — the same trick the credentials dialog already uses to
     dodge the icon slot. A bold title sits above the wrapping body,
@@ -867,6 +913,7 @@ class GlucoseApp(rumps.App):
         self._startup_item = rumps.MenuItem(
             _FRONTEND_STARTUP_TITLE, callback=self._on_toggle_startup
         )
+        self._about_item = rumps.MenuItem("About GlucoBar", callback=self._on_about)
 
         # The menubar title carries the full status story (number, trend
         # arrow, or an error glyph), so the dropdown holds no text row —
@@ -888,6 +935,8 @@ class GlucoseApp(rumps.App):
             None,
             self._startup_item,
             self._creds_item,
+            None,
+            self._about_item,
         ]
         self._update_startup_item()
 
@@ -1386,6 +1435,9 @@ class GlucoseApp(rumps.App):
             return False
         return True
 
+    def _on_about(self, _sender) -> None:
+        _show_about_panel()
+
     def _on_refresh(self, _sender) -> None:
         if not _has_stored_credentials():
             log.info("Refresh clicked while logged out; opening sign-in flow")
@@ -1649,10 +1701,8 @@ class GlucoseApp(rumps.App):
     def _show_alert(self, *, title: str, message: str) -> None:
         """Show an informational alert via native ``NSPanel``.
 
-        Uses :func:`_native_info_alert` (an ``NSPanel``)
-        instead of ``NSAlert`` so we don't paint the generic Python
-        launcher icon next to every message until we ship a real
-        ``GlucoBar.icns``.
+        Uses :func:`_native_info_alert` (an ``NSPanel``) instead of
+        ``NSAlert`` so layout matches our other custom modals.
         """
         _run_on_main_and_wait(
             lambda: _native_info_alert(title=title, message=message)

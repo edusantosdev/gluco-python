@@ -27,7 +27,7 @@ Build once, then launch directly from Finder without re-running setup:
 
 ```bash
 python3.11 -m venv .venv
-.venv/bin/python -m pip install -e .[dev,build]
+.venv/bin/python -m pip install -e '.[dev,build]'
 scripts/build_portable_app.sh
 open dist/GlucoBar.app
 ```
@@ -104,6 +104,7 @@ Menu actions:
 - `Refresh` — force daemon re-auth + immediate UI update
 - `Open at Login` — toggle LaunchAgent enable/disable for next login
 - `Sign In to / Sign Out of LibreView Account` — manage Keychain credentials
+- `About GlucoBar` — version, author, repository link, license, and disclaimer
 - `Quit`
 
 ## Configuration
@@ -136,7 +137,7 @@ Fixed runtime defaults:
 
 ```bash
 python3.11 -m venv .venv
-.venv/bin/python -m pip install -e .[dev,build]
+.venv/bin/python -m pip install -e '.[dev,build]'
 scripts/build_portable_app.sh
 open dist/GlucoBar.app
 ```
@@ -155,9 +156,13 @@ For the full release flow (tag, publish, update tap), see `RELEASING.md`.
 - Missing credentials: open the app once or run `.venv/bin/python scripts/set_credentials.py`.
 - Rebuilt venv / upgraded Python: rerun `scripts/install_launchagent.sh install`.
 - `Package 'gluco-bar' requires a different Python` (for example 3.9.x): recreate
-  `.venv` with Python 3.11+.
+`.venv` with Python 3.11+.
 - Editable install fails because of old packaging tooling: run
-  `.venv/bin/python -m pip install --upgrade pip setuptools wheel`.
+`.venv/bin/python -m pip install --upgrade pip setuptools wheel`.
+- zsh reports `no matches found` for extras install: run
+`.venv/bin/python -m pip install -e '.[dev,build]'` (quoted). If pasted
+comment lines still trigger globbing, avoid comments in pasted blocks or enable
+`setopt interactivecomments` in your shell.
 - "Another glucose daemon is already running": stop any manual `python -m daemon`, then relaunch.
 - Check daemon logs: `scripts/install_launchagent.sh logs` or tail `~/.glucobar/daemon.log`.
 
