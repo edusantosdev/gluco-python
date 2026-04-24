@@ -1,4 +1,4 @@
-"""Credentials resolver — macOS Keychain is the only source of truth.
+"""Credentials resolver — macOS Keychain with supervised-injection fallback.
 
 Why a shared module
 -------------------
@@ -19,18 +19,20 @@ Keychain-visible group:
                              so a single Keychain entry covers everything)
     username = "password"  → the LibreView password
 
-.. note::
-   Prior to v0.4.0 the daemon also accepted ``LIBREVIEW_EMAIL`` /
-   ``LIBREVIEW_PASSWORD`` (originally ``LIBRELINKUP_*``) from the
-   environment as a fallback. That path is gone: the daemon and menubar
-   now only read credentials from the Keychain. On first launch the
-   menubar prompts for them; to change them later, use the
-   **LibreView Account** menu item or ``scripts/set_credentials.py``.
+Source-of-truth ordering
+------------------------
+The daemon prefers credentials passed in its environment (set by the
+menubar supervisor) over a direct Keychain read. This avoids a second
+Keychain authorisation dialog for the daemon subprocess: the frontend
+binary (``GlucoBar``) is the only process that ever touches Keychain, and
+hands credentials to the daemon child via env. Direct ``python -m daemon``
+dev launches still fall back to Keychain when env vars are absent.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -39,6 +41,9 @@ log = logging.getLogger(__name__)
 KEYCHAIN_SERVICE = "glucobar"
 _EMAIL_KEY = "email"
 _PASSWORD_KEY = "password"
+
+ENV_EMAIL = "GLUCOBAR_LIBREVIEW_EMAIL"
+ENV_PASSWORD = "GLUCOBAR_LIBREVIEW_PASSWORD"  # noqa: S105 — env-var name, not a password
 
 
 class KeyringLike(Protocol):
@@ -71,17 +76,45 @@ class Credentials:
     password: str
 
 
+def load_credentials_from_env(
+    env: dict[str, str] | None = None,
+) -> Credentials | None:
+    """Return credentials from ``GLUCOBAR_LIBREVIEW_*`` env vars, if both set.
+
+    Used by the daemon when spawned as a child of the supervised menubar
+    frontend: the frontend reads Keychain once (triggering at most one
+    macOS dialog) and passes credentials down through env, so the daemon
+    subprocess never has to touch Keychain itself.
+    """
+    src = env if env is not None else os.environ
+    email = src.get(ENV_EMAIL, "").strip()
+    password = src.get(ENV_PASSWORD, "")
+    if email and password:
+        return Credentials(email=email, password=password)
+    return None
+
+
 def load_credentials(
     *,
     keyring_module: KeyringLike | None = None,
+    env: dict[str, str] | None = None,
 ) -> Credentials | None:
-    """Return the stored credentials, or ``None`` if the Keychain has none.
+    """Return the stored credentials, or ``None`` if none are available.
 
-    Both halves (email + password) must be present; if the Keychain has
-    only one of the two we treat it as absent. A partially-seeded
-    Keychain is always a bug, and silently returning half of it would
-    make that bug invisible.
+    Resolution order:
+
+    1. ``GLUCOBAR_LIBREVIEW_EMAIL`` / ``GLUCOBAR_LIBREVIEW_PASSWORD`` env
+       vars — used by the frontend supervisor to hand credentials to the
+       daemon without a second Keychain prompt.
+    2. macOS Keychain via ``keyring``.
+
+    Both halves (email + password) must be present at the resolved
+    source; a partially-seeded Keychain is always a bug, and silently
+    returning half of it would make that bug invisible.
     """
+    from_env = load_credentials_from_env(env=env)
+    if from_env is not None:
+        return from_env
     kr = keyring_module if keyring_module is not None else _default_keyring()
     if kr is None:
         return None

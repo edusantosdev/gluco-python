@@ -90,6 +90,25 @@ SpawnFn = Callable[..., subprocess.Popen]
 ProbeFn = Callable[[str, float], bool]
 
 
+def _default_daemon_executable() -> str:
+    """Return the best path to run ``-m daemon`` as.
+
+    Inside the bundled ``GlucoBar.app`` the build step (see
+    ``scripts/build_portable_app.sh``) places a ``GlucoBarDaemon``
+    copy of the Python launcher next to py2app's generic ``python``.
+    Using the renamed binary means any macOS permission dialog
+    triggered by the daemon subprocess identifies as
+    ``GlucoBarDaemon`` instead of a bare ``python``, which is
+    noticeably clearer for end users. Outside the bundle
+    (source checkouts, dev runs), fall back to ``sys.executable``.
+    """
+    exe = Path(sys.executable)
+    candidate = exe.with_name("GlucoBarDaemon")
+    if candidate.exists() and os.access(candidate, os.X_OK):
+        return str(candidate)
+    return sys.executable
+
+
 @dataclass
 class SupervisorConfig:
     """Knobs for :class:`DaemonSupervisor`.
@@ -114,7 +133,7 @@ class SupervisorConfig:
             os.environ.get("DAEMON_STATE_DIR", Path.home() / ".glucobar")
         )
     )
-    python_executable: str = field(default_factory=lambda: sys.executable)
+    python_executable: str = field(default_factory=lambda: _default_daemon_executable())
     working_directory: Path = field(
         default_factory=lambda: Path(__file__).resolve().parent.parent
     )
@@ -202,6 +221,10 @@ class DaemonSupervisor:
         self._child: subprocess.Popen | None = None
         self._stdout_file = None
         self._stderr_file = None
+        # Credentials injected into the daemon's env, so the daemon
+        # process never touches macOS Keychain directly (see
+        # ``glucose_common.credentials``).
+        self._injected_env: dict[str, str] = {}
         # Write end of the parent-death pipe. We keep this fd open and
         # never write to it; when *this process* exits (for any reason
         # — clean, SIGTERM, SIGKILL, crash), the kernel closes it and
@@ -225,6 +248,28 @@ class DaemonSupervisor:
     def mode(self) -> str:
         with self._lock:
             return self._mode
+
+    def set_credentials(self, email: str, password: str) -> None:
+        """Inject LibreView credentials into subsequent daemon spawns.
+
+        The frontend reads credentials from Keychain once and calls this
+        before ``start()`` (and again on Sign In) so the daemon child
+        never needs to re-read Keychain — collapsing the macOS auth
+        prompt to a single appearance tied to the main ``GlucoBar``
+        executable.
+        """
+        from glucose_common.credentials import ENV_EMAIL, ENV_PASSWORD
+
+        with self._lock:
+            self._injected_env = {
+                ENV_EMAIL: email,
+                ENV_PASSWORD: password,
+            }
+
+    def clear_credentials(self) -> None:
+        """Drop any injected credentials (e.g. after Sign Out)."""
+        with self._lock:
+            self._injected_env = {}
 
     @property
     def is_managed(self) -> bool:
@@ -494,6 +539,10 @@ class DaemonSupervisor:
         child_env = os.environ.copy()
         from daemon.parent_watch import ENV_FD
         child_env[ENV_FD] = str(read_fd)
+        with self._lock:
+            injected = dict(self._injected_env)
+        if injected:
+            child_env.update(injected)
 
         try:
             child = self._spawn_fn(

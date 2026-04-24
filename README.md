@@ -108,7 +108,13 @@ Menu actions:
 
 ## Configuration
 
-Credentials are Keychain-only.
+Credentials are Keychain-only. Only the menubar app (`GlucoBar`) reads
+Keychain; it forwards credentials to the daemon subprocess
+(`GlucoBarDaemon`) via env, so you only see a single "GlucoBar wants to
+access the glucobar Keychain item" dialog — click **Always Allow** and
+you're set. The bundled `.app` is ad-hoc code-signed by
+`scripts/build_portable_app.sh` so the grant persists across launches
+of the same build.
 
 Common `.env` variables:
 

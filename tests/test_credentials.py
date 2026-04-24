@@ -5,9 +5,12 @@ from __future__ import annotations
 import pytest
 
 from glucose_common.credentials import (
+    ENV_EMAIL,
+    ENV_PASSWORD,
     KEYCHAIN_SERVICE,
     clear_credentials,
     load_credentials,
+    load_credentials_from_env,
     save_credentials,
 )
 
@@ -80,3 +83,39 @@ def test_save_then_clear_roundtrip() -> None:
     assert load_credentials(keyring_module=kr) is not None
     clear_credentials(keyring_module=kr)
     assert load_credentials(keyring_module=kr) is None
+
+
+def test_env_injection_short_circuits_keychain() -> None:
+    """When the supervisor hands creds via env, the daemon must not touch Keychain.
+
+    This is how the bundled menubar avoids a second macOS Keychain
+    authorisation prompt for the daemon subprocess: the frontend reads
+    once, then passes credentials down through env.
+    """
+    kr = FakeKeyring(get_raises=AssertionError("Keychain must not be read"))
+    env = {ENV_EMAIL: "inject@x", ENV_PASSWORD: "injected-secret"}
+    creds = load_credentials(keyring_module=kr, env=env)
+    assert creds is not None
+    assert creds.email == "inject@x"
+    assert creds.password == "injected-secret"
+
+
+def test_env_injection_both_halves_required() -> None:
+    """Half-set env (e.g. only the email) must fall through to Keychain."""
+    kr = FakeKeyring()
+    save_credentials("k@x", "kpw", keyring_module=kr)
+    creds = load_credentials(
+        keyring_module=kr, env={ENV_EMAIL: "only-email@x"}
+    )
+    assert creds is not None
+    assert creds.email == "k@x"  # came from Keychain, not env
+
+
+def test_load_credentials_from_env_direct() -> None:
+    assert load_credentials_from_env({}) is None
+    assert load_credentials_from_env({ENV_EMAIL: "e@x"}) is None
+    got = load_credentials_from_env(
+        {ENV_EMAIL: "e@x", ENV_PASSWORD: "pw"}
+    )
+    assert got is not None
+    assert (got.email, got.password) == ("e@x", "pw")

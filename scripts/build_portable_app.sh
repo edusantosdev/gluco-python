@@ -83,9 +83,34 @@ EOF
         --bdist-base "${REPO_ROOT}/build/py2app"
 )
 
+APP_BUNDLE="${REPO_ROOT}/dist/GlucoBar.app"
+MACOS_DIR="${APP_BUNDLE}/Contents/MacOS"
+
+# Rename the subprocess Python launcher inside the bundle so macOS
+# permission dialogs (Keychain, network, etc.) triggered by any
+# subprocess show a recognisable "GlucoBarDaemon" identity instead of
+# the generic "python". py2app keeps the original ``python`` binary in
+# place; we add a sibling copy with a meaningful name so the supervisor
+# can launch the daemon under that identity.
+if [ -x "${MACOS_DIR}/python" ] && [ ! -e "${MACOS_DIR}/GlucoBarDaemon" ]; then
+    cp -p "${MACOS_DIR}/python" "${MACOS_DIR}/GlucoBarDaemon"
+    chmod 0755 "${MACOS_DIR}/GlucoBarDaemon"
+fi
+
+# Ad-hoc codesign the bundle so macOS treats it as a stable identity.
+# This reduces Keychain "allow?" re-prompts across future launches of
+# the same binary. Requires Xcode Command Line Tools (``codesign``).
+if command -v codesign >/dev/null 2>&1; then
+    echo "Ad-hoc signing ${APP_BUNDLE}..."
+    codesign --force --deep --sign - "${APP_BUNDLE}" || \
+        echo "warn: ad-hoc codesign failed; continuing (the .app will still run)." >&2
+else
+    echo "warn: codesign not found; skipping ad-hoc signature." >&2
+fi
+
 echo
 echo "Build complete:"
-echo "  ${REPO_ROOT}/dist/GlucoBar.app"
+echo "  ${APP_BUNDLE}"
 echo
 echo "Quick smoke run:"
-echo "  open \"${REPO_ROOT}/dist/GlucoBar.app\""
+echo "  open \"${APP_BUNDLE}\""

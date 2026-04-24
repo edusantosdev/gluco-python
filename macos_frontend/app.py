@@ -114,6 +114,14 @@ _THRESHOLD_VERY_HIGH_MG_DL = 250.0
 # notices they saw the menubar first, long enough that the runloop
 # has done one event pass so ``runModalForWindow_`` renders cleanly.
 _FIRST_RUN_PROMPT_DELAY_S = 0.3
+_STATE_DIR = Path(os.environ.get("DAEMON_STATE_DIR", str(Path.home() / ".glucobar"))).expanduser()
+_KEYCHAIN_NOTICE_SENTINEL = _STATE_DIR / ".keychain_notice_seen"
+_KEYCHAIN_NOTICE_TITLE = "About the macOS Keychain prompt"
+_KEYCHAIN_NOTICE_MESSAGE = (
+    "GlucoBar stores your LibreView sign-in in your Mac Keychain. "
+    "macOS may show a system dialog asking if GlucoBar can access that item.\n\n"
+    "Recommended: click \"Always Allow\" so you are not asked on every launch."
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -307,6 +315,26 @@ def _kickstart_daemon() -> None:
     """
     from macos_frontend.daemon_supervisor import request_restart
     request_restart()
+
+
+def _push_credentials_to_supervisor(email: str, password: str) -> None:
+    """Hand saved credentials to the supervisor so the daemon never reads Keychain."""
+    from macos_frontend.daemon_supervisor import get_active
+
+    sup = get_active()
+    if sup is None:
+        return
+    sup.set_credentials(email, password)
+
+
+def _clear_credentials_on_supervisor() -> None:
+    """Forget supervisor-injected credentials, e.g. after Sign Out."""
+    from macos_frontend.daemon_supervisor import get_active
+
+    sup = get_active()
+    if sup is None:
+        return
+    sup.clear_credentials()
 
 
 def _launchctl(*args: str) -> subprocess.CompletedProcess[str]:
@@ -834,7 +862,7 @@ class GlucoseApp(rumps.App):
         # which only refreshes once per poll.
         self._last_sensor_dt: datetime | None = None
         self._creds_item = rumps.MenuItem(
-            _SIGN_OUT_MENU_PRIMARY_TITLE, callback=self._on_logout_credentials
+            _SIGN_IN_MENU_PRIMARY_TITLE, callback=self._on_first_run_credentials
         )
         self._startup_item = rumps.MenuItem(
             _FRONTEND_STARTUP_TITLE, callback=self._on_toggle_startup
@@ -862,7 +890,6 @@ class GlucoseApp(rumps.App):
             self._creds_item,
         ]
         self._update_startup_item()
-        self._update_credentials_item()
 
         self._client = DaemonClient(base_url=base_url)
 
@@ -895,15 +922,37 @@ class GlucoseApp(rumps.App):
         self._timer.start()
         self._on_tick(None)
 
-        # First-run onboarding: if the Keychain is empty, pop the
-        # two-field credentials modal as soon as the AppKit runloop
-        # is live. ``NSApp.runModalForWindow_`` needs a running
-        # NSApplication — we can't open it from ``main()`` before
-        # ``app.run()``. A one-shot ``rumps.Timer`` with a tiny
-        # interval defers the call until after ``NSApp.run()`` is
-        # pumping events, which is the earliest moment the modal
-        # can render cleanly.
+        # Startup bootstrap: before any Keychain read, show a one-time
+        # explanatory modal so users know what the upcoming macOS prompt means.
+        # Then continue into the normal credentials flow.
+        self._startup_keychain_timer = rumps.Timer(
+            self._on_startup_keychain_tick, _FIRST_RUN_PROMPT_DELAY_S
+        )
+        self._startup_keychain_timer.start()
+
+        # First-run onboarding timer (armed only after startup bootstrap confirms
+        # credentials are missing).
         self._first_run_timer: rumps.Timer | None = None
+
+    def _maybe_show_keychain_notice(self) -> None:
+        """Show a one-time explanation before the first Keychain access."""
+        try:
+            if _KEYCHAIN_NOTICE_SENTINEL.exists():
+                return
+            self._show_alert(
+                title=_KEYCHAIN_NOTICE_TITLE,
+                message=_KEYCHAIN_NOTICE_MESSAGE,
+            )
+            _STATE_DIR.mkdir(parents=True, exist_ok=True)
+            _KEYCHAIN_NOTICE_SENTINEL.write_text("shown\n", encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            log.debug("Could not persist Keychain notice marker", exc_info=True)
+
+    def _on_startup_keychain_tick(self, _timer) -> None:
+        """Run one-shot startup Keychain bootstrap."""
+        self._startup_keychain_timer.stop()
+        self._maybe_show_keychain_notice()
+        self._update_credentials_item()
         if load_credentials() is None:
             self._first_run_timer = rumps.Timer(
                 self._on_first_run_tick, _FIRST_RUN_PROMPT_DELAY_S
@@ -1365,6 +1414,7 @@ class GlucoseApp(rumps.App):
                 ),
             )
             return
+        _clear_credentials_on_supervisor()
         # Restart the daemon so any in-memory/disk session is dropped now.
         _kickstart_daemon()
         _run_on_main_and_wait(lambda: self._on_tick(None))
@@ -1443,6 +1493,7 @@ class GlucoseApp(rumps.App):
                 )
                 continue
             log.info("Saved LibreView credentials from first-run prompt")
+            _push_credentials_to_supervisor(email, password)
             _run_on_main_and_wait(self._update_credentials_item)
             _run_on_main_and_wait(self._set_signing_in_state)
             # Daemon is in the supervisor's sticky EX_CONFIG state; nudge
@@ -1573,6 +1624,7 @@ class GlucoseApp(rumps.App):
                     ),
                 )
                 continue
+            _push_credentials_to_supervisor(email, password)
             _run_on_main_and_wait(self._update_credentials_item)
             _run_on_main_and_wait(self._set_signing_in_state)
             # Kick the daemon so it re-authenticates with the new credentials
@@ -1638,6 +1690,19 @@ def main() -> int:
         set_active,
     )
     supervisor = DaemonSupervisor(SupervisorConfig(base_url=base_url))
+    # Read Keychain once, in the frontend, and hand credentials to the
+    # supervisor so the daemon subprocess never triggers a second macOS
+    # Keychain authorisation prompt. Missing credentials are fine — the
+    # daemon will exit EX_CONFIG and the menubar's first-run onboarding
+    # path (see ``GlucoseApp._on_first_run_tick``) will collect them and
+    # push them back to the supervisor via ``set_credentials``.
+    try:
+        boot_creds = load_credentials()
+    except Exception:  # noqa: BLE001
+        boot_creds = None
+        log.exception("Could not read Keychain at startup")
+    if boot_creds is not None:
+        supervisor.set_credentials(boot_creds.email, boot_creds.password)
     try:
         supervisor.start()
     except Exception:  # noqa: BLE001 — frontend must still start
