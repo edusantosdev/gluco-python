@@ -21,10 +21,24 @@ It is an independent open-source project and is not affiliated with Abbott.
 - Active Libre sensor + LibreLink phone app uploading to LibreView
 - LibreView account credentials
 
-## Quick Start (from source)
+## Daily Use (bundled `.app`)
+
+Build once, then launch directly from Finder without re-running setup:
 
 ```bash
-python3 -m venv .venv
+python3.11 -m venv .venv
+.venv/bin/python -m pip install -e .[dev,build]
+scripts/build_portable_app.sh
+open dist/GlucoBar.app
+```
+
+After this, you can run `dist/GlucoBar.app` directly (or move it to `/Applications`).
+
+## Quick Start (from source / development)
+
+```bash
+python3.11 -m venv .venv
+.venv/bin/python -V  # should be 3.11+
 .venv/bin/python -m pip install -e .
 scripts/install_launchagent.sh install
 ```
@@ -64,6 +78,10 @@ scripts/install_launchagent.sh uninstall  # remove login autostart
 scripts/install_launchagent.sh status
 scripts/install_launchagent.sh logs
 ```
+
+Note: the app's `Open at Login` menu item only enables/disables an existing
+LaunchAgent plist. If no plist is installed yet, run
+`scripts/install_launchagent.sh install` once first.
 
 Poke the daemon API directly:
 
@@ -111,7 +129,7 @@ Fixed runtime defaults:
 ## Standalone App Build (py2app)
 
 ```bash
-python3 -m venv .venv
+python3.11 -m venv .venv
 .venv/bin/python -m pip install -e .[dev,build]
 scripts/build_portable_app.sh
 open dist/GlucoBar.app
@@ -130,6 +148,10 @@ For the full release flow (tag, publish, update tap), see `RELEASING.md`.
 - Account/region issues: run `.venv/bin/python scripts/phase0_probe.py`.
 - Missing credentials: open the app once or run `.venv/bin/python scripts/set_credentials.py`.
 - Rebuilt venv / upgraded Python: rerun `scripts/install_launchagent.sh install`.
+- `Package 'gluco-bar' requires a different Python` (for example 3.9.x): recreate
+  `.venv` with Python 3.11+.
+- Editable install fails because of old packaging tooling: run
+  `.venv/bin/python -m pip install --upgrade pip setuptools wheel`.
 - "Another glucose daemon is already running": stop any manual `python -m daemon`, then relaunch.
 - Check daemon logs: `scripts/install_launchagent.sh logs` or tail `~/.glucobar/daemon.log`.
 
