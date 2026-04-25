@@ -25,8 +25,8 @@ FreeStyle Libre, LibreLink, LibreView) are property of Abbott Laboratories.
 
 ## Versioning
 
-Release **1.0** is declared as **`1.0.0`** in `pyproject.toml` (`project.version`).
-The menubar **About** window and Finder read **`CFBundleShortVersionString`**
+Release **1.0** is declared as `**1.0.0`** in `pyproject.toml` (`project.version`).
+The menubar **About** window and Finder read `**CFBundleShortVersionString`**
 from the `.app` bundle (`scripts/app_bundle/Info.plist.tmpl` and
 `scripts/build_portable_app.sh`), so those strings are what users see for
 “v1.0”. Python’s package metadata may display a normalized form (for example
@@ -38,12 +38,12 @@ new release.
 - **License:** [Apache-2.0](LICENSE) — see `LICENSE` for the full text.
 - **NOTICE:** Project and third-party attribution summary (`NOTICE`).
 - **Open source and assets:** [ATTRIBUTIONS.md](ATTRIBUTIONS.md) — runtime
-  dependencies, build tools, the droplet icon source, and how to verify
-  transitive licenses.
+dependencies, build tools, the droplet icon source, and how to verify
+transitive licenses.
 - **Copyright:** A copyright line in `NOTICE` and in the app bundle
-  (`NSHumanReadableCopyright`) is the usual way to record authorship under
-  Apache-2.0. It is not a substitute for professional legal advice about
-  liability (see the disclaimer above).
+(`NSHumanReadableCopyright`) is the usual way to record authorship under
+Apache-2.0. It is not a substitute for professional legal advice about
+liability (see the disclaimer above).
 
 ## Requirements
 
@@ -203,3 +203,4 @@ comment lines still trigger globbing, avoid comments in pasted blocks or enable
 .venv/bin/python -m pytest tests/
 .venv/bin/python -m ruff check .
 ```
+

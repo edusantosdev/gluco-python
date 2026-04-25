@@ -53,6 +53,7 @@ from AppKit import (
     NSTextField,
     NSView,
     NSWindowStyleMaskTitled,
+    NSWorkspace,
 )
 from dotenv import load_dotenv
 from Foundation import NSURL, NSBundle, NSMinY, NSObject, NSPoint
@@ -275,13 +276,22 @@ def _show_about_panel() -> None:
         NSAboutPanelOptionApplicationVersion: v,
         NSAboutPanelOptionCredits: _about_credits_attributed_string(),
     }
+    # Use the same icon Finder shows for this ``.app``: loading ``GlucoBar.icns`` directly
+    # can select a different representation or scaling than the workspace cache does for
+    # the bundle, so About and the main app icon can look different otherwise.
     bundle = NSBundle.mainBundle()
     if bundle is not None:
-        path = bundle.pathForResource_ofType_("GlucoBar", "icns")
-        if path:
-            icon = NSImage.alloc().initWithContentsOfFile_(path)
+        app_path = bundle.bundlePath()
+        if app_path:
+            icon = NSWorkspace.sharedWorkspace().iconForFile_(app_path)
             if icon is not None:
                 opts[NSAboutPanelOptionApplicationIcon] = icon
+            else:
+                path = bundle.pathForResource_ofType_("GlucoBar", "icns")
+                if path:
+                    fallback = NSImage.alloc().initWithContentsOfFile_(path)
+                    if fallback is not None:
+                        opts[NSAboutPanelOptionApplicationIcon] = fallback
     NSApp.orderFrontStandardAboutPanelWithOptions_(opts)
     try:
         NSApp.activateIgnoringOtherApps_(True)
