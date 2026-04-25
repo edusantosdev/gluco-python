@@ -139,9 +139,6 @@ the app.
   retry loop.
 - Reliability > feature breadth. GlucoBar is a personal utility, not
   a medical workflow.
-- UI and docs should be explicit that GlucoBar supports glucose awareness
-  only: it is not a medical device, is provided as-is, and must not be used
-  for diagnosis, treatment, dosing, or emergency decisions.
 
 ## Future Direction
 
@@ -161,3 +158,15 @@ Explicit non-goals, for now:
 - In-app threshold editing
 - Desktop alerting as a headline feature
 - Broad distro/package parity before the macOS path is solid
+
+## Version and legal metadata
+
+The release version is the `version` field in `pyproject.toml` (for example
+`1.0.0`). The menubar About window and the daemon’s OpenAPI `version` read
+that value via `importlib.metadata` after install. The thin `.app` bundle and
+`py2app` dist bundle copy `CFBundleVersion` / `CFBundleShortVersionString` from
+the same number in `Info.plist` templates / `build_portable_app.sh` — keep
+those aligned when you cut a release.
+
+User-facing copy, `NOTICE`, and `ATTRIBUTIONS.md` summarize licensing and
+third-party material; the canonical Apache-2.0 text is `LICENSE`.

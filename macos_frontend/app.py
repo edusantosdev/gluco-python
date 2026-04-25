@@ -30,7 +30,9 @@ import rumps
 from AppKit import (
     NSAboutPanelOptionApplicationIcon,
     NSAboutPanelOptionApplicationName,
+    NSAboutPanelOptionApplicationVersion,
     NSAboutPanelOptionCredits,
+    NSAboutPanelOptionVersion,
     NSApp,
     NSApplication,
     NSApplicationActivationPolicyAccessory,
@@ -66,6 +68,7 @@ from glucose_common.credentials import (  # noqa: E402
     load_credentials,
     save_credentials,
 )
+from glucose_common.version import package_version  # noqa: E402
 from macos_frontend.api_client import (  # noqa: E402
     CurrentReading,
     DaemonClient,
@@ -170,8 +173,15 @@ def _about_credits_attributed_string() -> NSMutableAttributedString:
         "Repository\n"
         f"{_REPO_URL}\n\n"
         "License\n"
-        "Apache License 2.0. See the LICENSE and NOTICE files in the source repository.\n"
+        "Apache License 2.0. See the LICENSE, NOTICE, and ATTRIBUTIONS.md files in the source "
+        "repository.\n"
         "The software is provided as-is, without warranties or guarantees.\n\n"
+        "Open source\n"
+        "GlucoBar builds on other open source projects. The droplet in the app icon is from "
+        "SVG Repo; the menubar uses rumps; LibreView data uses pylibrelinkup; the UI uses AppKit "
+        "via PyObjC; the local daemon API uses FastAPI, Uvicorn, and Pydantic; the frontend talks "
+        "to the daemon with httpx; credentials use keyring. A fuller list, licenses, and build "
+        "tooling are in ATTRIBUTIONS.md in the same repository as the app.\n\n"
         "Disclaimer\n"
         "GlucoBar is not a medical device and must not be used for diagnosis, treatment, "
         "dosing, emergency decisions, or any other medical decision. Readings may be delayed, "
@@ -191,23 +201,40 @@ def _about_credits_attributed_string() -> NSMutableAttributedString:
     return attr
 
 
-def _about_icon_image():
-    """Load the bundled app icon explicitly for the standard About panel."""
-    path = NSBundle.mainBundle().pathForResource_ofType_("GlucoBar", "icns")
-    if not path:
-        return None
-    return NSImage.alloc().initWithContentsOfFile_(path)
+def _about_version_string() -> str:
+    """Version shown in the About box: prefer the bundle’s ``Info.plist``."""
+    bundle = NSBundle.mainBundle()
+    if bundle is not None:
+        info = bundle.infoDictionary()
+        if info is not None:
+            s = info.get("CFBundleShortVersionString")
+            if s:
+                return str(s)
+    return package_version()
 
 
 def _show_about_panel() -> None:
-    """Open the standard About window with the bundled icon and credits."""
+    """Open the standard About window.
+
+    ``CFBundleIconFile`` and bundle metadata supply defaults, but
+    ``LSUIElement`` frontends can show a blank icon unless we pass an
+    explicit image. Version strings come from installed package metadata
+    (``pyproject.toml``) so the UI matches the declared release.
+    """
+    v = _about_version_string()
     opts = {
         NSAboutPanelOptionApplicationName: "GlucoBar",
+        NSAboutPanelOptionVersion: v,
+        NSAboutPanelOptionApplicationVersion: v,
         NSAboutPanelOptionCredits: _about_credits_attributed_string(),
     }
-    icon = _about_icon_image()
-    if icon is not None:
-        opts[NSAboutPanelOptionApplicationIcon] = icon
+    bundle = NSBundle.mainBundle()
+    if bundle is not None:
+        path = bundle.pathForResource_ofType_("GlucoBar", "icns")
+        if path:
+            icon = NSImage.alloc().initWithContentsOfFile_(path)
+            if icon is not None:
+                opts[NSAboutPanelOptionApplicationIcon] = icon
     NSApp.orderFrontStandardAboutPanelWithOptions_(opts)
     try:
         NSApp.activateIgnoringOtherApps_(True)

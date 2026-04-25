@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""Render GlucoBar.app icon assets and build ``GlucoBar.icns``.
-
-The app icon is a black rounded tile with the sourced SVG Repo droplet in white.
+"""Render GlucoBar.app icon assets (black tile + white SVG Repo droplet) and build ``GlucoBar.icns``.
 
 Requires macOS (uses AppKit drawing + ``iconutil``). Run from the repo root::
 

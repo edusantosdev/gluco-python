@@ -30,6 +30,7 @@ if str(_REPO_ROOT) not in sys.path:
 from glucose_common.regions import resolve_libreview_region  # noqa: E402
 from glucose_common.trend import trend_name, trend_symbol  # noqa: E402
 from glucose_common.units import glucose_unit_label  # noqa: E402
+from glucose_common.version import package_version  # noqa: E402
 
 from .backoff import ExponentialBackoff  # noqa: E402
 from .config import MissingCredentialsError, Settings, load_settings  # noqa: E402
@@ -143,7 +144,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="glucose-daemon",
-    version="1.0",
+    version=package_version(),
     description="Personal LibreView polling daemon — local HTTP API.",
     lifespan=lifespan,
 )

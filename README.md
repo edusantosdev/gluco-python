@@ -1,9 +1,9 @@
 # GlucoBar
 
-GlucoBar keeps your latest LibreView glucose reading and trend visible in the macOS
-menu bar, so you can see whether you are in range, rising, or dropping while
-focused on your Mac. It helps you notice high or low blood sugar values sooner
-without having to pick up your phone to check.
+GlucoBar keeps your latest LibreView glucose reading and trend in the macOS
+menu bar so you can see whether you are in range, rising, or dropping while
+you work. It is not a phone replacement for LibreView; it is a convenience
+viewer tied to the same account data.
 
 - `daemon/` polls LibreView and serves local HTTP on `127.0.0.1:8765`.
 - `macos_frontend/` is a menubar UI (`rumps` + AppKit) that reads from the daemon.
@@ -14,15 +14,36 @@ For releases, see `RELEASING.md`.
 
 ## Disclaimer
 
-GlucoBar is not a medical device and must not be used for diagnosis, treatment,
-dosing, emergency decisions, or any other medical decision. Readings may be
-delayed, missing, inaccurate, or unavailable. Always verify glucose information
-with your official LibreView/LibreLink app, glucose meter, or qualified
-healthcare professional.
+GlucoBar is **not a medical device** and must not be used for diagnosis,
+treatment, dosing, emergency decisions, or any other medical decision.
+Glucose values may be delayed, missing, or wrong. Always confirm with your
+official LibreView/LibreLink app, a meter, or a qualified professional.
 
-This is an independent open-source project. It is not affiliated with, endorsed
-by, or supported by Abbott or LibreView. The software is provided as-is, without
-warranties or guarantees, and you use it at your own risk.
+This is an **independent open-source** project. It is not affiliated with,
+endorsed by, or supported by Abbott. Abbott trademarks (for example
+FreeStyle Libre, LibreLink, LibreView) are property of Abbott Laboratories.
+
+## Versioning
+
+Release **1.0** is declared as **`1.0.0`** in `pyproject.toml` (`project.version`).
+The menubar **About** window and Finder read **`CFBundleShortVersionString`**
+from the `.app` bundle (`scripts/app_bundle/Info.plist.tmpl` and
+`scripts/build_portable_app.sh`), so those strings are what users see for
+“v1.0”. Python’s package metadata may display a normalized form (for example
+`1.0`); keep `pyproject.toml` and the bundle plists in step when you cut a
+new release.
+
+## License, notices, and third-party credit
+
+- **License:** [Apache-2.0](LICENSE) — see `LICENSE` for the full text.
+- **NOTICE:** Project and third-party attribution summary (`NOTICE`).
+- **Open source and assets:** [ATTRIBUTIONS.md](ATTRIBUTIONS.md) — runtime
+  dependencies, build tools, the droplet icon source, and how to verify
+  transitive licenses.
+- **Copyright:** A copyright line in `NOTICE` and in the app bundle
+  (`NSHumanReadableCopyright`) is the usual way to record authorship under
+  Apache-2.0. It is not a substitute for professional legal advice about
+  liability (see the disclaimer above).
 
 ## Requirements
 
@@ -182,10 +203,3 @@ comment lines still trigger globbing, avoid comments in pasted blocks or enable
 .venv/bin/python -m pytest tests/
 .venv/bin/python -m ruff check .
 ```
-
-## License
-
-Apache-2.0. See `LICENSE` and `NOTICE`.
-
-Third-party software and icon acknowledgements are listed in
-`THIRD_PARTY_NOTICES.md`.

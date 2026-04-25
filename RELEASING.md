@@ -3,6 +3,11 @@
 Short release checklist for macOS artifacts and Homebrew cask updates.
 Release automation lives in `.github/workflows/release.yml`.
 
+Set `version` in `pyproject.toml` to the release you are shipping (for example
+`1.0.0`), and update `scripts/app_bundle/Info.plist.tmpl` and
+`scripts/build_portable_app.sh` if those strings still need to match. Reinstall
+or rebuild app bundles so Finder and the About box show the new version.
+
 ## 1. Build and test locally
 
 ```bash
@@ -14,12 +19,6 @@ scripts/build_portable_app.sh
 ```
 
 Output: `dist/GlucoBar.app`.
-
-Keep the public app version at `1.0` until you intentionally request a version
-bump. If the version changes, update `pyproject.toml`, the app bundle metadata
-in `scripts/app_bundle/Info.plist.tmpl`, the py2app plist in
-`scripts/build_portable_app.sh`, and the daemon API version in `daemon/main.py`
-in the same change.
 
 ## 2. Package a release artifact
 
@@ -75,7 +74,5 @@ Optionally `brew upgrade --cask gluco-bar` from the previous version.
 ## Notes
 
 - Artifacts are currently unsigned and not notarized.
-- Before publishing, review `NOTICE` and `THIRD_PARTY_NOTICES.md` whenever
-  dependencies, bundled assets, or licensing/disclaimer language changes.
 - For a manual fallback (no tag workflow), use
   `gh release create vX.Y.Z release/GlucoBar-vX.Y.Z-macos.zip`.
