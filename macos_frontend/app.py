@@ -126,6 +126,83 @@ _ABOUT_TAGLINE = (
 _AUTHOR_NAME = "Eduardo Santos"
 _REPO_URL = "https://github.com/eduardo/librelinkup-glucose-menubar-python"
 
+# Third-party components and artwork — shown as a link list in the About panel.
+# Keep in sync with ``pyproject.toml`` dependencies, Apple frameworks, and the icon.
+_ABOUT_OSS_LINKS: tuple[tuple[str, str], ...] = (
+    ("Apache License 2.0 (GlucoBar)", "https://www.apache.org/licenses/LICENSE-2.0"),
+    ("App icon droplet (via SVG Repo)", "https://www.svgrepo.com/"),
+    ("FastAPI", "https://fastapi.tiangolo.com/"),
+    ("httpx", "https://www.python-httpx.org/"),
+    ("keyring", "https://github.com/jaraco/keyring"),
+    ("macOS AppKit & Foundation", "https://developer.apple.com/documentation/appkit"),
+    ("pylibrelinkup (LibreView / LibreLinkUp API client)", "https://pypi.org/project/pylibrelinkup/"),
+    ("PyObjC (Python ↔ AppKit and Objective-C)", "https://github.com/ronaldoussoren/pyobjc"),
+    ("Pydantic", "https://docs.pydantic.dev/"),
+    ("pydantic-settings", "https://github.com/pydantic/pydantic-settings"),
+    ("python-dotenv", "https://github.com/theskumar/python-dotenv"),
+    ("Python (runtime)", "https://www.python.org/"),
+    ("rumps (menubar app)", "https://github.com/jaredks/rumps"),
+    ("Uvicorn", "https://www.uvicorn.org/"),
+)
+
+
+def _about_credits_text_and_link_ranges() -> tuple[str, list[tuple[int, int, str]]]:
+    """Build About credits and ``(start, end, url)`` ranges for tappable links."""
+    parts: list[str] = []
+    ranges: list[tuple[int, int, str]] = []
+
+    def _append_linked_line(label: str, url: str) -> None:
+        line = f"• {label}\n"
+        line_start = sum(len(p) for p in parts)
+        parts.append(line)
+        # Link the label only, after the bullet and space.
+        rstart = line_start + 2
+        rend = rstart + len(label)
+        ranges.append((rstart, rend, url))
+
+    parts.append(f"{_ABOUT_TAGLINE}\n\n")
+    parts.append(f"Created by\n{_AUTHOR_NAME}\n\n")
+    parts.append("Project page (source & issues)\n")
+    repo_start = sum(len(p) for p in parts)
+    parts.append(f"{_REPO_URL}\n\n")
+    ranges.append((repo_start, repo_start + len(_REPO_URL), _REPO_URL))
+
+    parts.append("License\n")
+    parts.append(
+        "GlucoBar is distributed under the Apache License, version 2.0. The software is "
+        "provided as-is, without warranties or guarantees of any kind.\n\n"
+    )
+    parts.append("Open source\n")
+    parts.append(
+        "The following projects, libraries, and systems are used to build and run GlucoBar. "
+        "Tap a name to open its page in your browser.\n\n"
+    )
+    for label, url in _ABOUT_OSS_LINKS:
+        _append_linked_line(label, url)
+    parts.append(
+        "\nDisclaimer\n"
+        "GlucoBar is not a medical device and must not be used for diagnosis, treatment, "
+        "dosing, emergency decisions, or any other medical decision. Readings may be delayed, "
+        "missing, inaccurate, or unavailable. Always verify glucose information with your "
+        "official LibreView/LibreLink app, glucose meter, or qualified healthcare professional.\n\n"
+        "This is an independent open-source project. It is not affiliated with, endorsed by, "
+        "or supported by Abbott or LibreView. You use GlucoBar at your own risk."
+    )
+    text = "".join(parts)
+    return text, ranges
+
+
+def _attributed_string_with_http_links(plain: str, link_ranges: list[tuple[int, int, str]]):
+    """``NSMutableAttributedString`` with ``NSLinkAttributeName`` for each range."""
+    attr = NSMutableAttributedString.alloc().initWithString_(plain)
+    for rstart, rend, url in link_ranges:
+        attr.addAttribute_value_range_(
+            NSLinkAttributeName,
+            NSURL.URLWithString_(url),
+            (rstart, rend - rstart),
+        )
+    return attr
+
 # How long to wait after the AppKit runloop starts before popping the
 # first-run credentials modal. Short enough that a fresh user never
 # notices they saw the menubar first, long enough that the runloop
@@ -166,39 +243,9 @@ log = logging.getLogger("glucose.frontend")
 
 
 def _about_credits_attributed_string() -> NSMutableAttributedString:
-    """Credits text for the system About panel (includes tappable repo link)."""
-    body = (
-        f"{_ABOUT_TAGLINE}\n\n"
-        f"Created by\n{_AUTHOR_NAME}\n\n"
-        "Repository\n"
-        f"{_REPO_URL}\n\n"
-        "License\n"
-        "Apache License 2.0. See the LICENSE, NOTICE, and ATTRIBUTIONS.md files in the source "
-        "repository.\n"
-        "The software is provided as-is, without warranties or guarantees.\n\n"
-        "Open source\n"
-        "GlucoBar builds on other open source projects. The droplet in the app icon is from "
-        "SVG Repo; the menubar uses rumps; LibreView data uses pylibrelinkup; the UI uses AppKit "
-        "via PyObjC; the local daemon API uses FastAPI, Uvicorn, and Pydantic; the frontend talks "
-        "to the daemon with httpx; credentials use keyring. A fuller list, licenses, and build "
-        "tooling are in ATTRIBUTIONS.md in the same repository as the app.\n\n"
-        "Disclaimer\n"
-        "GlucoBar is not a medical device and must not be used for diagnosis, treatment, "
-        "dosing, emergency decisions, or any other medical decision. Readings may be delayed, "
-        "missing, inaccurate, or unavailable. Always verify glucose information with your "
-        "official LibreView/LibreLink app, glucose meter, or qualified healthcare professional.\n\n"
-        "This is an independent open-source project. It is not affiliated with, endorsed by, "
-        "or supported by Abbott or LibreView. You use GlucoBar at your own risk."
-    )
-    attr = NSMutableAttributedString.alloc().initWithString_(body)
-    start = body.find(_REPO_URL)
-    if start >= 0:
-        attr.addAttribute_value_range_(
-            NSLinkAttributeName,
-            NSURL.URLWithString_(_REPO_URL),
-            (start, len(_REPO_URL)),
-        )
-    return attr
+    """Credits for the About panel: project URL and each third-party link are tappable."""
+    text, link_ranges = _about_credits_text_and_link_ranges()
+    return _attributed_string_with_http_links(text, link_ranges)
 
 
 def _about_version_string() -> str:
