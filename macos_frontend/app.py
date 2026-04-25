@@ -56,7 +56,7 @@ from AppKit import (
     NSWorkspace,
 )
 from dotenv import load_dotenv
-from Foundation import NSURL, NSBundle, NSMinY, NSObject, NSPoint
+from Foundation import NSURL, NSBundle, NSMinY, NSObject, NSPoint, NSSize
 from rumps import events as rumps_events
 
 # Keep repo root importable when launched from the app wrapper.
@@ -261,6 +261,23 @@ def _about_version_string() -> str:
     return package_version()
 
 
+# ``NSWorkspace.iconForFile_`` often returns a 32pt logical size; the standard About
+# panel uses ``NSImage.size`` to size the header artwork, so it looks tiny unless we
+# scale up. Do not downscale an already large icon.
+_ABOUT_PANEL_ICON_MAX_EDGE_PT = 192.0
+
+
+def _enlarge_image_for_about_panel_if_needed(icon) -> None:
+    s = icon.size()
+    if s.width <= 0 or s.height <= 0:
+        return
+    m = max(s.width, s.height)
+    if m >= _ABOUT_PANEL_ICON_MAX_EDGE_PT:
+        return
+    k = _ABOUT_PANEL_ICON_MAX_EDGE_PT / m
+    icon.setSize_(NSSize(s.width * k, s.height * k))
+
+
 def _show_about_panel() -> None:
     """Open the standard About window.
 
@@ -285,12 +302,14 @@ def _show_about_panel() -> None:
         if app_path:
             icon = NSWorkspace.sharedWorkspace().iconForFile_(app_path)
             if icon is not None:
+                _enlarge_image_for_about_panel_if_needed(icon)
                 opts[NSAboutPanelOptionApplicationIcon] = icon
             else:
                 path = bundle.pathForResource_ofType_("GlucoBar", "icns")
                 if path:
                     fallback = NSImage.alloc().initWithContentsOfFile_(path)
                     if fallback is not None:
+                        _enlarge_image_for_about_panel_if_needed(fallback)
                         opts[NSAboutPanelOptionApplicationIcon] = fallback
     NSApp.orderFrontStandardAboutPanelWithOptions_(opts)
     try:
