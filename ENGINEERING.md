@@ -139,6 +139,9 @@ the app.
   retry loop.
 - Reliability > feature breadth. GlucoBar is a personal utility, not
   a medical workflow.
+- UI and docs should be explicit that GlucoBar supports glucose awareness
+  only: it is not a medical device, is provided as-is, and must not be used
+  for diagnosis, treatment, dosing, or emergency decisions.
 
 ## Future Direction
 

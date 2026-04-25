@@ -77,13 +77,13 @@ OPTIONS = {
         "CFBundleName": "GlucoBar",
         "CFBundleDisplayName": "GlucoBar",
         "CFBundleIdentifier": "com.glucobar.frontend",
-        "CFBundleVersion": "0.3.0",
-        "CFBundleShortVersionString": "0.3.0",
+        "CFBundleVersion": "1.0",
+        "CFBundleShortVersionString": "1.0",
         "LSUIElement": True,
         "NSHighResolutionCapable": True,
         "CFBundleIconFile": "GlucoBar",
         "NSHumanReadableCopyright": (
-            "Copyright © 2026 Eduardo Santos. Apache-2.0. Not a medical device."
+            "Copyright © 2026 Eduardo Santos. Apache-2.0. Provided as-is; not a medical device."
         ),
     },
 }

@@ -3,16 +3,21 @@ Copyright 2026 The GlucoBar contributors
 
 Licensed under the Apache License, Version 2.0 (see LICENSE).
 
-This product is not a medical device and is not intended for clinical
-decision-making. Glucose data retrieved through this tool originates
-from your own LibreView account; the authors are not affiliated with,
-endorsed by, or otherwise associated with Abbott Laboratories.
-"FreeStyle Libre", "LibreLink", "LibreLinkUp", and "LibreView" are
-trademarks of Abbott Laboratories.
+This product is not a medical device and must not be used for diagnosis,
+treatment, dosing, emergency decisions, or any other medical decision.
+Readings may be delayed, missing, inaccurate, or unavailable. Always verify
+glucose information with your official LibreView/LibreLink app, glucose meter,
+or qualified healthcare professional.
+
+This software is provided as-is, without warranties or guarantees, and is used
+at your own risk. The authors and contributors are not affiliated with,
+endorsed by, or supported by Abbott Laboratories or LibreView. "FreeStyle
+Libre", "LibreLink", "LibreLinkUp", and "LibreView" are trademarks of Abbott
+Laboratories.
 
 This product bundles or depends on third-party open source software.
-Their respective licenses apply; see each project's source for details.
-Notable runtime dependencies:
+Their respective licenses apply; see each project's source for details and
+THIRD_PARTY_NOTICES.md for acknowledgements. Notable runtime dependencies:
 
   - pylibrelinkup       (MIT)
   - rumps               (BSD-3-Clause)
@@ -24,3 +29,7 @@ Notable runtime dependencies:
   - pydantic-settings   (MIT)
   - python-dotenv       (BSD-3-Clause)
   - keyring             (MIT)
+
+Icon asset:
+
+  - Drop SVG Vector from SVG Repo (CC0 / public-domain-style license)

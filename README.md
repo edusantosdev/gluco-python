@@ -1,6 +1,9 @@
 # GlucoBar
 
-GlucoBar is a macOS menubar app that shows your current LibreView glucose value and trend.
+GlucoBar keeps your latest LibreView glucose reading and trend visible in the macOS
+menu bar, so you can see whether you are in range, rising, or dropping while
+focused on your Mac. It helps you notice high or low blood sugar values sooner
+without having to pick up your phone to check.
 
 - `daemon/` polls LibreView and serves local HTTP on `127.0.0.1:8765`.
 - `macos_frontend/` is a menubar UI (`rumps` + AppKit) that reads from the daemon.
@@ -11,8 +14,15 @@ For releases, see `RELEASING.md`.
 
 ## Disclaimer
 
-GlucoBar is not a medical device and is not for diagnosis/treatment decisions.
-It is an independent open-source project and is not affiliated with Abbott.
+GlucoBar is not a medical device and must not be used for diagnosis, treatment,
+dosing, emergency decisions, or any other medical decision. Readings may be
+delayed, missing, inaccurate, or unavailable. Always verify glucose information
+with your official LibreView/LibreLink app, glucose meter, or qualified
+healthcare professional.
+
+This is an independent open-source project. It is not affiliated with, endorsed
+by, or supported by Abbott or LibreView. The software is provided as-is, without
+warranties or guarantees, and you use it at your own risk.
 
 ## Requirements
 
@@ -176,3 +186,6 @@ comment lines still trigger globbing, avoid comments in pasted blocks or enable
 ## License
 
 Apache-2.0. See `LICENSE` and `NOTICE`.
+
+Third-party software and icon acknowledgements are listed in
+`THIRD_PARTY_NOTICES.md`.

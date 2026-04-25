@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Render GlucoBar.app icon assets (yellow tile + white SVG Repo droplet) and build ``GlucoBar.icns``.
+"""Render GlucoBar.app icon assets and build ``GlucoBar.icns``.
+
+The app icon is a black rounded tile with the sourced SVG Repo droplet in white.
 
 Requires macOS (uses AppKit drawing + ``iconutil``). Run from the repo root::
 
@@ -137,7 +139,7 @@ def _svg_path_to_bezier(path_data: str):
 
 
 def _draw_app_icon(pixels: int):
-    """Return an ``NSImage`` ``pixels``×``pixels`` with a yellow tile and sourced white droplet."""
+    """Return an ``NSImage`` ``pixels``×``pixels`` with a black tile and sourced white droplet."""
     from AppKit import (
         NSBezierPath,
         NSColor,
@@ -150,8 +152,8 @@ def _draw_app_icon(pixels: int):
     img = NSImage.alloc().initWithSize_(NSSize(size, size))
     img.lockFocus()
     try:
-        yellow = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.96, 0.78, 0.16, 1.0)
-        yellow.setFill()
+        bg = NSColor.colorWithCalibratedWhite_alpha_(0.05, 1.0)
+        bg.setFill()
         corner = size * 0.223
         tile = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
             NSMakeRect(0, 0, size, size), corner, corner

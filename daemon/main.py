@@ -143,7 +143,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="glucose-daemon",
-    version="0.4.0",
+    version="1.0",
     description="Personal LibreView polling daemon — local HTTP API.",
     lifespan=lifespan,
 )

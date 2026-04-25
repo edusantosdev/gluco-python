@@ -28,6 +28,7 @@ from pathlib import Path
 import objc
 import rumps
 from AppKit import (
+    NSAboutPanelOptionApplicationIcon,
     NSAboutPanelOptionApplicationName,
     NSAboutPanelOptionCredits,
     NSApp,
@@ -40,6 +41,7 @@ from AppKit import (
     NSFont,
     NSFontAttributeName,
     NSForegroundColorAttributeName,
+    NSImage,
     NSLayoutConstraint,
     NSLinkAttributeName,
     NSMakeRect,
@@ -113,8 +115,10 @@ _THRESHOLD_HIGH_MG_DL = 180.0
 _THRESHOLD_VERY_HIGH_MG_DL = 250.0
 
 _ABOUT_TAGLINE = (
-    "GlucoBar is a macOS menubar app that shows your current LibreView glucose "
-    "value and trend."
+    "GlucoBar keeps your latest LibreView glucose reading and trend visible in the macOS "
+    "menu bar, so you can see whether you are in range, rising, or dropping while focused "
+    "on your Mac. It helps you notice high or low blood sugar values sooner without having "
+    "to pick up your phone to check."
 )
 _AUTHOR_NAME = "Eduardo Santos"
 _REPO_URL = "https://github.com/eduardo/librelinkup-glucose-menubar-python"
@@ -162,14 +166,19 @@ def _about_credits_attributed_string() -> NSMutableAttributedString:
     """Credits text for the system About panel (includes tappable repo link)."""
     body = (
         f"{_ABOUT_TAGLINE}\n\n"
-        f"Author\n{_AUTHOR_NAME}\n\n"
+        f"Created by\n{_AUTHOR_NAME}\n\n"
         "Repository\n"
         f"{_REPO_URL}\n\n"
         "License\n"
-        "Apache License 2.0. See the LICENSE and NOTICE files in the source repository.\n\n"
+        "Apache License 2.0. See the LICENSE and NOTICE files in the source repository.\n"
+        "The software is provided as-is, without warranties or guarantees.\n\n"
         "Disclaimer\n"
-        "GlucoBar is not a medical device and is not for diagnosis or treatment decisions. "
-        "It is an independent open-source project and is not affiliated with Abbott."
+        "GlucoBar is not a medical device and must not be used for diagnosis, treatment, "
+        "dosing, emergency decisions, or any other medical decision. Readings may be delayed, "
+        "missing, inaccurate, or unavailable. Always verify glucose information with your "
+        "official LibreView/LibreLink app, glucose meter, or qualified healthcare professional.\n\n"
+        "This is an independent open-source project. It is not affiliated with, endorsed by, "
+        "or supported by Abbott or LibreView. You use GlucoBar at your own risk."
     )
     attr = NSMutableAttributedString.alloc().initWithString_(body)
     start = body.find(_REPO_URL)
@@ -182,12 +191,23 @@ def _about_credits_attributed_string() -> NSMutableAttributedString:
     return attr
 
 
+def _about_icon_image():
+    """Load the bundled app icon explicitly for the standard About panel."""
+    path = NSBundle.mainBundle().pathForResource_ofType_("GlucoBar", "icns")
+    if not path:
+        return None
+    return NSImage.alloc().initWithContentsOfFile_(path)
+
+
 def _show_about_panel() -> None:
-    """Open the standard About window (app icon comes from ``CFBundleIconFile``)."""
+    """Open the standard About window with the bundled icon and credits."""
     opts = {
         NSAboutPanelOptionApplicationName: "GlucoBar",
         NSAboutPanelOptionCredits: _about_credits_attributed_string(),
     }
+    icon = _about_icon_image()
+    if icon is not None:
+        opts[NSAboutPanelOptionApplicationIcon] = icon
     NSApp.orderFrontStandardAboutPanelWithOptions_(opts)
     try:
         NSApp.activateIgnoringOtherApps_(True)
