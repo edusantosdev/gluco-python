@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render GlucoBar.app icon assets (blood-toned droplet + CGM stroke) and build ``GlucoBar.icns``.
+"""Render GlucoBar.app icon assets (yellow SF Symbols droplet) and build ``GlucoBar.icns``.
 
 Requires macOS (uses AppKit drawing + ``iconutil``). Run from the repo root::
 
@@ -33,52 +33,14 @@ _ICONSET_ENTRIES: tuple[tuple[str, int], ...] = (
     ("icon_512x512@2x.png", 1024),
 )
 
-
-def _droplet_path(size: float):
-    """Symmetric teardrop inside ``(0,0)–(size,size)`` with comfortable margins."""
-    from AppKit import NSBezierPath
-
-    pad = size * 0.06
-    cx = size * 0.5
-    tip_y = size - pad
-    # Upper bulb: smooth round head; sides pinch into the tip.
-    top_y = pad + size * 0.12
-    shoulder_y = pad + size * 0.42
-    path = NSBezierPath.bezierPath()
-    path.moveToPoint_((cx, tip_y))
-    path.curveToPoint_controlPoint1_controlPoint2_(
-        (pad + size * 0.08, top_y + size * 0.06),
-        (cx - size * 0.02, tip_y - size * 0.08),
-        (pad + size * 0.02, shoulder_y),
-    )
-    path.curveToPoint_controlPoint1_controlPoint2_(
-        (cx, top_y),
-        (pad + size * 0.18, top_y + size * 0.02),
-        (cx - size * 0.26, top_y + size * 0.02),
-    )
-    path.curveToPoint_controlPoint1_controlPoint2_(
-        (size - pad - size * 0.08, top_y + size * 0.06),
-        (cx + size * 0.26, top_y + size * 0.02),
-        (size - pad - size * 0.18, top_y + size * 0.02),
-    )
-    path.curveToPoint_controlPoint1_controlPoint2_(
-        (cx, tip_y),
-        (size - pad - size * 0.02, shoulder_y),
-        (cx + size * 0.02, tip_y - size * 0.08),
-    )
-    path.closePath()
-    return path
-
-
 def _draw_app_icon(pixels: int):
-    """Return an ``NSImage`` ``pixels``×``pixels`` with blood-toned droplet + CGM stroke."""
+    """Return an ``NSImage`` ``pixels``×``pixels`` with a yellow library droplet icon."""
     from AppKit import (
         NSBezierPath,
         NSColor,
-        NSGradient,
+        NSCompositingOperationSourceOver,
         NSImage,
-        NSLineCapStyleRound,
-        NSLineJoinStyleRound,
+        NSImageSymbolConfiguration,
     )
     from Foundation import NSMakeRect, NSSize
 
@@ -90,36 +52,24 @@ def _draw_app_icon(pixels: int):
         NSColor.clearColor().setFill()
         NSBezierPath.fillRect_(NSMakeRect(0, 0, size, size))
 
-        drop = _droplet_path(size)
-        # Deep crimson → slightly brighter red (reads as blood / glucose, not “error”).
-        deep = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.55, 0.05, 0.10, 1.0)
-        mid = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.78, 0.12, 0.18, 1.0)
-        grad = NSGradient.alloc().initWithStartingColor_endingColor_(deep, mid)
-        grad.drawInBezierPath_angle_(drop, -45.0)
+        symbol = NSImage.imageWithSystemSymbolName_accessibilityDescription_("drop.fill", None)
+        if symbol is None:
+            raise RuntimeError("Could not load SF Symbol: drop.fill")
 
-        # Soft specular edge (keeps shape readable at 16×16).
-        NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 0.45, 0.42, 0.22).setStroke()
-        hair = max(1.0, size * 0.018)
-        drop.setLineWidth_(hair)
-        drop.stroke()
+        yellow = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.96, 0.78, 0.16, 1.0)
+        config = NSImageSymbolConfiguration.configurationWithHierarchicalColor_(yellow)
+        symbol = symbol.imageWithSymbolConfiguration_(config) or symbol
 
-        # Simple white trend line (abstract CGM curve) in the bulb.
-        line = NSBezierPath.bezierPath()
-        pad = size * 0.22
-        w = size - 2 * pad
-        h = size * 0.22
-        base_y = pad + h * 0.55
-        line.moveToPoint_((pad, base_y + h * 0.45))
-        line.lineToPoint_((pad + w * 0.22, base_y + h * 0.05))
-        line.lineToPoint_((pad + w * 0.45, base_y + h * 0.52))
-        line.lineToPoint_((pad + w * 0.72, base_y + h * 0.0))
-        line.lineToPoint_((pad + w, base_y + h * 0.38))
-        NSColor.colorWithCalibratedWhite_alpha_(0.95, 0.92).setStroke()
-        stroke_w = max(1.5, size * 0.055)
-        line.setLineWidth_(stroke_w)
-        line.setLineCapStyle_(NSLineCapStyleRound)
-        line.setLineJoinStyle_(NSLineJoinStyleRound)
-        line.stroke()
+        pad = size * 0.08
+        rect = NSMakeRect(pad, pad, size - 2 * pad, size - 2 * pad)
+        symbol.drawInRect_fromRect_operation_fraction_respectFlipped_hints_(
+            rect,
+            NSMakeRect(0, 0, 0, 0),
+            NSCompositingOperationSourceOver,
+            1.0,
+            True,
+            None,
+        )
     finally:
         img.unlockFocus()
     return img
