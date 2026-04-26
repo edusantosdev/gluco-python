@@ -25,8 +25,8 @@ FreeStyle Libre, LibreLink, LibreView) are property of Abbott Laboratories.
 
 ## Versioning
 
-Release **1.0** is declared as `**1.0.0`** in `pyproject.toml` (`project.version`).
-The menubar **About** window and Finder read `**CFBundleShortVersionString`**
+Release **1.0** is declared as `1.0.0` in `pyproject.toml` (`project.version`).
+The menubar **About** window and Finder read `CFBundleShortVersionString`
 from the `.app` bundle (`scripts/app_bundle/Info.plist.tmpl` and
 `scripts/build_portable_app.sh`), so those strings are what users see for
 “v1.0”. Python’s package metadata may display a normalized form (for example
