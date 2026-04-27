@@ -445,6 +445,7 @@ def _run_on_main_and_wait(fn):
 # Menu row title shown before the gray username suffix.
 _SIGN_OUT_MENU_PRIMARY_TITLE = "Sign Out of LibreView Account"
 _SIGN_IN_MENU_PRIMARY_TITLE = "Sign In to LibreView Account"
+_CREDENTIALS_MENU_MAX_CHARS = 58
 
 # Plain title used when the credentials dialog is opened without custom copy.
 _LIBREVIEW_ACCOUNT_TITLE = "LibreView Account"
@@ -471,6 +472,17 @@ def _credentials_dialog_prefill() -> tuple[str, str]:
     if loaded is not None:
         return loaded.email.strip(), loaded.password
     return "", ""
+
+
+def _truncate_with_ellipsis(text: str, max_chars: int) -> str:
+    """Clamp ``text`` to ``max_chars`` using a trailing ellipsis."""
+    if max_chars <= 0:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    if max_chars == 1:
+        return "…"
+    return text[: max_chars - 1] + "…"
 
 
 def _has_stored_credentials() -> bool:
@@ -1488,7 +1500,10 @@ class GlucoseApp(rumps.App):
     def _apply_credentials_attr_title(self, primary: str, email: str) -> None:
         joiner = " ("
         closer = ")"
-        full = f"{primary}{joiner}{email}{closer}"
+        fixed_chars = len(primary) + len(joiner) + len(closer)
+        email_budget = max(8, _CREDENTIALS_MENU_MAX_CHARS - fixed_chars)
+        email_display = _truncate_with_ellipsis(email, email_budget)
+        full = f"{primary}{joiner}{email_display}{closer}"
         attr = NSMutableAttributedString.alloc().initWithString_(full)
         full_range = (0, len(full))
         attr.addAttribute_value_range_(
@@ -1502,7 +1517,7 @@ class GlucoseApp(rumps.App):
             full_range,
         )
         secondary_start = len(primary)
-        secondary_len = len(joiner) + len(email) + len(closer)
+        secondary_len = len(joiner) + len(email_display) + len(closer)
         attr.addAttribute_value_range_(
             NSForegroundColorAttributeName,
             NSColor.secondaryLabelColor(),
