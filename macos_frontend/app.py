@@ -46,9 +46,12 @@ from AppKit import (
     NSImage,
     NSLayoutConstraint,
     NSLinkAttributeName,
+    NSLineBreakByTruncatingTail,
     NSMakeRect,
     NSMutableAttributedString,
+    NSMutableParagraphStyle,
     NSPanel,
+    NSParagraphStyleAttributeName,
     NSSecureTextField,
     NSTextField,
     NSView,
@@ -1490,6 +1493,13 @@ class GlucoseApp(rumps.App):
         full_range = (0, len(full))
         attr.addAttribute_value_range_(
             NSFontAttributeName, NSFont.menuFontOfSize_(0), full_range
+        )
+        paragraph_style = NSMutableParagraphStyle.alloc().init()
+        paragraph_style.setLineBreakMode_(NSLineBreakByTruncatingTail)
+        attr.addAttribute_value_range_(
+            NSParagraphStyleAttributeName,
+            paragraph_style,
+            full_range,
         )
         secondary_start = len(primary)
         secondary_len = len(joiner) + len(email) + len(closer)
