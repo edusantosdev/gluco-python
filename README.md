@@ -19,19 +19,9 @@ treatment, dosing, emergency decisions, or any other medical decision.
 Glucose values may be delayed, missing, or wrong. Always confirm with your
 official LibreView/LibreLink app, a meter, or a qualified professional.
 
-This is an **independent open-source** project. It is not affiliated with,
-endorsed by, or supported by Abbott. Abbott trademarks (for example
+This is an **independent open-source** project. It is not affiliated with,  
+endorsed by, or supported by Abbott. Abbott trademarks (for example  
 FreeStyle Libre, LibreLink, LibreView) are property of Abbott Laboratories.
-
-## Versioning
-
-Release **1.0** is declared as `1.0.0` in `pyproject.toml` (`project.version`).
-The menubar **About** window and Finder read `CFBundleShortVersionString`
-from the `.app` bundle (`scripts/app_bundle/Info.plist.tmpl` and
-`scripts/build_portable_app.sh`), so those strings are what users see for
-“v1.0”. Python’s package metadata may display a normalized form (for example
-`1.0`); keep `pyproject.toml` and the bundle plists in step when you cut a
-new release.
 
 ## License, notices, and third-party credit
 
