@@ -16,7 +16,6 @@ from __future__ import annotations
 import logging
 import math
 import os
-import re
 import subprocess
 import sys
 import threading
@@ -45,8 +44,8 @@ from AppKit import (
     NSForegroundColorAttributeName,
     NSImage,
     NSLayoutConstraint,
-    NSLinkAttributeName,
     NSLineBreakByTruncatingTail,
+    NSLinkAttributeName,
     NSMakeRect,
     NSMutableAttributedString,
     NSMutableParagraphStyle,
@@ -456,14 +455,18 @@ _SIGN_IN_DIALOG_BODY = (
 )
 _SIGN_IN_DIALOG_BUTTON = "Sign In"
 
-# launchd label + plist path for the one and only LaunchAgent GlucoBar
-# installs: the frontend, which in turn supervises the daemon as a
-# child process via :mod:`macos_frontend.daemon_supervisor`. Used by
-# the "Open at Login" menu item's launchctl enable/disable
-# calls.
-_FRONTEND_LAUNCHD_LABEL = "com.glucobar.frontend"
 _FRONTEND_STARTUP_TITLE = "Open at Login"
-_FRONTEND_PLIST_PATH = Path.home() / "Library/LaunchAgents/com.glucobar.frontend.plist"
+
+
+def _bundle_path() -> str:
+    """Return the running app bundle path as a POSIX string."""
+    bundle = NSBundle.mainBundle()
+    if bundle is not None:
+        path = bundle.bundlePath()
+        if path:
+            return str(path)
+    # Fallback for odd launch contexts; a bundled launch should have this.
+    return str(Path(sys.executable).resolve())
 
 
 def _credentials_dialog_prefill() -> tuple[str, str]:
@@ -522,10 +525,11 @@ def _clear_credentials_on_supervisor() -> None:
     sup.clear_credentials()
 
 
-def _launchctl(*args: str) -> subprocess.CompletedProcess[str]:
-    """Run launchctl with stdout/stderr captured."""
+def _osascript(script: str, *args: str) -> subprocess.CompletedProcess[str]:
+    """Run osascript with source read from stdin."""
     return subprocess.run(
-        ["/bin/launchctl", *args],
+        ["/usr/bin/osascript", "-", *args],
+        input=script,
         capture_output=True,
         text=True,
         timeout=10,
@@ -533,34 +537,28 @@ def _launchctl(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _frontend_startup_enabled() -> bool:
-    """Return whether launchd startup is enabled for the frontend."""
-    if not _FRONTEND_PLIST_PATH.exists():
-        return False
-
-    uid = os.getuid()
-    disabled_target = f"gui/{uid}"
+    """Return whether this app bundle is registered as a login item."""
+    app_path = _bundle_path()
+    script = """
+on run argv
+    set appPath to item 1 of argv
+    tell application "System Events"
+        return (count of (every login item whose path is appPath)) > 0
+    end tell
+end run
+"""
     try:
-        disabled_proc = _launchctl("print-disabled", disabled_target)
+        proc = _osascript(script, app_path)
     except Exception:  # noqa: BLE001
-        log.exception("launchctl print-disabled failed")
+        log.exception("osascript failed while checking login item state")
         return False
-
-    if disabled_proc.returncode == 0:
-        # launchctl output shape: "... com.glucobar.frontend => true/false".
-        disabled_match = re.search(
-            rf"{re.escape(_FRONTEND_LAUNCHD_LABEL)}\s*=>\s*(true|false)",
-            disabled_proc.stdout or "",
+    if proc.returncode != 0:
+        log.warning(
+            "Could not read login item state via System Events: %s",
+            (proc.stderr or proc.stdout or "unknown error").strip(),
         )
-        if disabled_match is not None:
-            return disabled_match.group(1) == "false"
-
-    # Fallback: treat a loaded label as enabled.
-    print_target = f"{disabled_target}/{_FRONTEND_LAUNCHD_LABEL}"
-    try:
-        return _launchctl("print", print_target).returncode == 0
-    except Exception:  # noqa: BLE001
-        log.exception("launchctl print failed for %s", print_target)
         return False
+    return (proc.stdout or "").strip().lower() == "true"
 
 
 class _CredentialsDialogController(NSObject):
@@ -1724,12 +1722,21 @@ class GlucoseApp(rumps.App):
         _run_in_background(self._toggle_startup_impl)
 
     def _toggle_startup_impl(self) -> None:
-        uid = os.getuid()
-        target = f"gui/{uid}/{_FRONTEND_LAUNCHD_LABEL}"
+        app_path = _bundle_path()
         enabled = _frontend_startup_enabled()
         if enabled:
             try:
-                proc = _launchctl("disable", target)
+                proc = _osascript(
+                    """
+on run argv
+    set appPath to item 1 of argv
+    tell application "System Events"
+        delete every login item whose path is appPath
+    end tell
+end run
+""",
+                    app_path,
+                )
             except Exception as e:  # noqa: BLE001
                 self._show_alert(
                     title="Couldn't update startup setting",
@@ -1739,24 +1746,28 @@ class GlucoseApp(rumps.App):
             if proc.returncode != 0:
                 self._show_alert(
                     title="Couldn't update startup setting",
-                    message=(proc.stderr or proc.stdout or "launchctl disable failed").strip(),
+                    message=(
+                        proc.stderr or proc.stdout or "Disabling login item failed"
+                    ).strip(),
                 )
                 return
             _run_on_main_and_wait(self._update_startup_item)
             return
 
-        if not _FRONTEND_PLIST_PATH.exists():
-            self._show_alert(
-                title="Startup agent not installed",
-                message=(
-                    "LaunchAgent file not found at:\n"
-                    f"{_FRONTEND_PLIST_PATH}\n\n"
-                    "Run scripts/install_launchagent.sh install first."
-                ),
-            )
-            return
         try:
-            proc = _launchctl("enable", target)
+            proc = _osascript(
+                """
+on run argv
+    set appPath to item 1 of argv
+    tell application "System Events"
+        if (count of (every login item whose path is appPath)) is 0 then
+            make login item at end with properties {path:appPath, hidden:false}
+        end if
+    end tell
+end run
+""",
+                app_path,
+            )
         except Exception as e:  # noqa: BLE001
             self._show_alert(
                 title="Couldn't update startup setting",
@@ -1766,7 +1777,9 @@ class GlucoseApp(rumps.App):
         if proc.returncode != 0:
             self._show_alert(
                 title="Couldn't update startup setting",
-                message=(proc.stderr or proc.stdout or "launchctl enable failed").strip(),
+                message=(
+                    proc.stderr or proc.stdout or "Enabling login item failed"
+                ).strip(),
             )
             return
         _run_on_main_and_wait(self._update_startup_item)

@@ -52,9 +52,7 @@ liability (see the disclaimer above).
 - Active Libre sensor + LibreLink phone app uploading to LibreView
 - LibreView account credentials
 
-## Daily Use (bundled `.app`)
-
-Build once, then launch directly from Finder without re-running setup:
+## Build and run (`.app`)
 
 ```bash
 python3.11 -m venv .venv
@@ -63,16 +61,8 @@ scripts/build_portable_app.sh
 open dist/GlucoBar.app
 ```
 
-After this, you can run `dist/GlucoBar.app` directly (or move it to `/Applications`).
-
-## Quick Start (from source / development)
-
-```bash
-python3.11 -m venv .venv
-.venv/bin/python -V  # should be 3.11+
-.venv/bin/python -m pip install -e .
-scripts/install_launchagent.sh install
-```
+After building, you can launch `dist/GlucoBar.app` directly from Finder
+(or move it to `/Applications`).
 
 Optional `.env` for non-credential settings:
 
@@ -96,30 +86,9 @@ Verify account + region quickly:
 
 ## Runtime
 
-One LaunchAgent (`com.glucobar.frontend`) starts the menubar at login.
-The menubar then supervises the daemon as a child process. If a daemon
-is already running (e.g. you started one in a terminal), the menubar
+The menubar supervises the daemon as a child process. If a daemon is
+already running (e.g. you started one in a terminal), the menubar
 attaches to it instead of spawning its own.
-
-Manage the install:
-
-```bash
-scripts/install_launchagent.sh install    # apply/restart current install
-scripts/install_launchagent.sh uninstall  # remove login autostart
-scripts/install_launchagent.sh status
-scripts/install_launchagent.sh logs
-```
-
-Note: the app's `Open at Login` menu item only enables/disables an existing
-LaunchAgent plist. If no plist is installed yet, run
-`scripts/install_launchagent.sh install` once first.
-
-Poke the daemon API directly:
-
-```bash
-curl -s http://127.0.0.1:8765/glucose/current | jq
-curl -s -X POST http://127.0.0.1:8765/auth/refresh | jq
-```
 
 ## Menubar Status
 
@@ -133,7 +102,7 @@ curl -s -X POST http://127.0.0.1:8765/auth/refresh | jq
 Menu actions:
 
 - `Refresh` — force daemon re-auth + immediate UI update
-- `Open at Login` — toggle LaunchAgent enable/disable for next login
+- `Open at Login` — toggle macOS login item registration for next login
 - `Sign In to / Sign Out of LibreView Account` — manage Keychain credentials
 - `About GlucoBar` — version, author, repository link, license, and disclaimer
 - `Quit`
@@ -164,14 +133,7 @@ Fixed runtime defaults:
 - stale cutoff: 360s
 - color thresholds: `<70`, `70-180`, `180-250`, `>250` mg/dL
 
-## Standalone App Build (py2app)
-
-```bash
-python3.11 -m venv .venv
-.venv/bin/python -m pip install -e '.[dev,build]'
-scripts/build_portable_app.sh
-open dist/GlucoBar.app
-```
+## Packaging for releases
 
 Create release zip + SHA:
 
@@ -185,7 +147,7 @@ For the full release flow (tag, publish, update tap), see `RELEASING.md`.
 
 - Account/region issues: run `.venv/bin/python scripts/phase0_probe.py`.
 - Missing credentials: open the app once or run `.venv/bin/python scripts/set_credentials.py`.
-- Rebuilt venv / upgraded Python: rerun `scripts/install_launchagent.sh install`.
+- Rebuilt venv / upgraded Python: rerun `scripts/build_portable_app.sh`.
 - `Package 'gluco-bar' requires a different Python` (for example 3.9.x): recreate
 `.venv` with Python 3.11+.
 - Editable install fails because of old packaging tooling: run
@@ -195,7 +157,7 @@ For the full release flow (tag, publish, update tap), see `RELEASING.md`.
 comment lines still trigger globbing, avoid comments in pasted blocks or enable
 `setopt interactivecomments` in your shell.
 - "Another glucose daemon is already running": stop any manual `python -m daemon`, then relaunch.
-- Check daemon logs: `scripts/install_launchagent.sh logs` or tail `~/.glucobar/daemon.log`.
+- Check daemon logs: tail `~/.glucobar/daemon.log`.
 
 ## Development
 
