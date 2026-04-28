@@ -13,8 +13,6 @@ GlucoBar is two processes communicating over local HTTP on
 
 Process ownership:
 
-- Only the frontend is registered with `launchd`
-  (`com.glucobar.frontend`).
 - The frontend supervises the daemon as a child process in
   **managed** mode, respawning on crash (with a crash-rate limit) and
   tearing it down on Quit.
@@ -25,7 +23,9 @@ Process ownership:
 - A parent-death pipe (`daemon/parent_watch.py`, wired up via
   `GLUCOBAR_PARENT_PIPE_FD`) ensures the daemon exits even if the
   frontend dies without running signal handlers (e.g. SIGKILL,
-  `launchctl bootout`). No ghost daemons.
+  force-quit). No ghost daemons.
+- `Open at Login` is implemented as a macOS login item toggle for the
+  running app bundle path (not via LaunchAgent enable/disable).
 
 ## Daemon (`daemon/`)
 
@@ -65,8 +65,8 @@ save, the frontend writes the Keychain entries and asks the
 supervisor to restart the daemon so it re-authenticates immediately.
 
 The frontend must launch from inside `GlucoBar.app` (either the
-source wrapper built by `scripts/install_launchagent.sh` or the
-standalone `py2app` bundle). Running `python -m macos_frontend`
+source wrapper bundle or the standalone `py2app` bundle). Running
+`python -m macos_frontend`
 directly is intentionally rejected — AppKit modals need a real
 `CFBundleIdentifier` and `LSUIElement` to behave.
 
@@ -91,7 +91,7 @@ Default state dir: `~/.glucobar/` (override via `DAEMON_STATE_DIR`).
 - `daemon.stdout.log` / `daemon.stderr.log` — supervisor-captured
   child stdio
 - `launchd.frontend.out.log` / `launchd.frontend.err.log` —
-  launchd's capture of the menubar process
+  launchd capture when running via `scripts/install_launchagent.sh`
 
 Credentials are never read from `.env` or environment variables.
 Keychain (`service = "glucobar"`) is the only source of truth, and
