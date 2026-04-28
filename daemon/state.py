@@ -18,6 +18,7 @@ class Status(StrEnum):
     STALE = "stale"  # last reading older than the staleness window
     WARMING_UP = "warming_up"  # sensor in 60-min warm-up
     NO_NETWORK = "no_network"  # connection failures, backing off
+    ERROR = "error"  # unexpected runtime/sensor/API-shape failures
     AUTH_FAILED = "auth_failed"  # credentials rejected
     TOS_REQUIRED = "tos_required"  # user must accept in Libre app
     RATE_LIMITED = "rate_limited"  # honoring retry_after
@@ -51,6 +52,7 @@ def http_status_summary(s: Status) -> str:
         Status.STALE,
         Status.RATE_LIMITED,
         Status.NO_NETWORK,
+        Status.ERROR,
     ):
         return "degraded"
     return "down"  # AUTH_FAILED, TOS_REQUIRED

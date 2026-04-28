@@ -857,6 +857,7 @@ _STATUS_GLYPH = {
     "warming_up": "Connecting…",
     "rate_limited": "Connecting…",
     "no_network": "⚠ Offline",
+    "error": "⚠ Error",
     "auth_failed": "⚠ Sign In",
     "tos_required": "⚠ Sign In",
 }

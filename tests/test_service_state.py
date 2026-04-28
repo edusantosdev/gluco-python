@@ -301,6 +301,15 @@ def test_tick_uses_backoff_on_network_error(service: GlucoseService) -> None:
     assert service.snapshot().consecutive_failures == 3
 
 
+def test_tick_marks_unexpected_poll_errors_as_error(service: GlucoseService) -> None:
+    """Non-network exceptions should not be surfaced as Offline."""
+    assert service._authenticate_once()
+    service.client.read_queue.append(ValueError("bad sensor payload"))
+    delay = service._tick()
+    assert delay == 1
+    assert service.snapshot().status == Status.ERROR
+
+
 def test_tick_resets_backoff_after_success(service: GlucoseService) -> None:
     assert service._authenticate_once()
     service.client.read_queue.extend(

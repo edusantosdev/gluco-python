@@ -62,6 +62,38 @@ _BACKOFF_ON_TOS_SECONDS = 300
 _HISTORY_RETAIN_HOURS = 12
 
 
+def _is_network_failure(exc: Exception) -> bool:
+    """Best-effort check for transport/connectivity failures.
+
+    Keep this conservative: only classify well-known transport exceptions
+    as ``NO_NETWORK``. Everything else becomes ``ERROR`` so UI messaging
+    doesn't claim the internet is down when the issue is elsewhere.
+    """
+    network_types: tuple[type[BaseException], ...] = (
+        ConnectionError,
+        TimeoutError,
+        OSError,
+    )
+    if isinstance(exc, network_types):
+        return True
+    # Some third-party clients wrap transport failures in generic exceptions;
+    # look for common cues before falling back to non-network.
+    msg = str(exc).lower()
+    return any(
+        token in msg
+        for token in (
+            "timed out",
+            "timeout",
+            "connection refused",
+            "name or service not known",
+            "temporary failure in name resolution",
+            "network is unreachable",
+            "connection reset",
+            "broken pipe",
+        )
+    )
+
+
 class GlucoseService:
     def __init__(
         self,
@@ -279,7 +311,10 @@ class GlucoseService:
             )
         except Exception as e:  # noqa: BLE001
             log.exception("Unexpected auth error")
-            self._set_state(status=Status.NO_NETWORK, last_error=f"{type(e).__name__}: {e}")
+            self._set_state(
+                status=Status.ERROR,
+                last_error=f"{type(e).__name__}: {e}",
+            )
         self.patient = None
         return False
 
@@ -510,8 +545,9 @@ class GlucoseService:
 
     def _handle_poll_error(self, e: Exception) -> None:
         log.warning("Poll failed: %s: %s", type(e).__name__, e)
+        status = Status.NO_NETWORK if _is_network_failure(e) else Status.ERROR
         self._set_state(
-            status=Status.NO_NETWORK,
+            status=status,
             last_error=f"{type(e).__name__}: {e}",
             bump_failures=True,
         )
