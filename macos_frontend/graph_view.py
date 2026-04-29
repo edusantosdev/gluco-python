@@ -35,6 +35,12 @@ from AppKit import (
     NSRectFill,
     NSView,
 )
+from Foundation import NSDate, NSDateFormatter, NSLocale
+
+# NSDateFormatterStyle: no date part, localized short time (12h vs 24h follows
+# System Settings → General → Language & Region → Time format).
+_NS_DATEFMT_NO_STYLE = 0  # NSDateFormatterNoStyle
+_NS_DATEFMT_TIME_SHORT = 1  # NSDateFormatterShortStyle
 
 log = logging.getLogger("glucose.frontend.graph")
 
@@ -60,6 +66,22 @@ _THRESHOLD_GUIDE_ALPHA = 0.55
 # is the right behaviour visually (an off-scale dot still pegs at the edge).
 _Y_MIN = 40.0
 _Y_MAX = 300.0
+
+_axis_short_time_formatter: NSDateFormatter | None = None
+
+
+def _local_short_time_axis_label(unix_ts: float) -> str:
+    """Local wall-clock time for graph ticks; honors macOS 12/24-hour preference."""
+    global _axis_short_time_formatter
+    if _axis_short_time_formatter is None:
+        fmt = NSDateFormatter.alloc().init()
+        fmt.setDateStyle_(_NS_DATEFMT_NO_STYLE)
+        fmt.setTimeStyle_(_NS_DATEFMT_TIME_SHORT)
+        _axis_short_time_formatter = fmt
+    fmt = _axis_short_time_formatter
+    fmt.setLocale_(NSLocale.currentLocale())
+    d = NSDate.alloc().initWithTimeIntervalSince1970_(unix_ts)
+    return str(fmt.stringFromDate_(d))
 
 
 @dataclass(frozen=True)
@@ -183,16 +205,18 @@ class GlucoseGraphView(NSView):
 
     def _draw_x_labels(self, plot) -> None:
         attrs = self._small_text_attrs()
-        # Three ticks: full window back, halfway back, now. The middle label
-        # collapses if the window is too short for cleanly halving.
-        labels: list[tuple[float, str]] = [(0.0, f"-{self._hours}h")]
+        # Three ticks: window start, midpoint, now — localized short time (same
+        # instants as _x_for / _draw_line); 12h vs 24h matches System Settings.
+        now_s = datetime.now(UTC).timestamp()
+        span_s = float(self._hours * 3600)
+        frac_ts: list[tuple[float, float]] = [(0.0, now_s - span_s)]
         if self._hours >= 2:
-            labels.append((0.5, f"-{self._hours // 2}h"))
-        labels.append((1.0, "Now"))
+            frac_ts.append((0.5, now_s - span_s / 2.0))
+        frac_ts.append((1.0, now_s))
+        labels = [(frac, _local_short_time_axis_label(ts)) for frac, ts in frac_ts]
         # Sit inside the bottom margin band (height = _PLOT_EDGE_INSET_Y).
-        sample = NSAttributedString.alloc().initWithString_attributes_(
-            "-8h", attrs
-        )
+        widest = max((t for _f, t in labels), key=lambda s: len(s))
+        sample = NSAttributedString.alloc().initWithString_attributes_(widest, attrs)
         label_h = float(sample.size().height)
         m_y = _PLOT_EDGE_INSET_Y
         axis_y = max(0.0, (m_y - label_h) / 2.0)
