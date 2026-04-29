@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
 
 import objc
 from AppKit import (
@@ -153,12 +152,18 @@ class GlucoseGraphView(NSView):
         frac = (v - _Y_MIN) / (_Y_MAX - _Y_MIN)
         return plot.origin.y + frac * plot.size.height
 
-    def _x_for(self, plot, ts_seconds: float, now_seconds: float) -> float:
-        # Right edge = now; left edge = now - hours*3600.
+    def _plot_window_end_seconds(self) -> float:
+        """Unix time at the graph's right edge: newest sample (list is oldest-first)."""
+        return self._points[-1][0]
+
+    def _x_for(self, plot, ts_seconds: float, ref_seconds: float) -> float:
+        # Right edge = ref_seconds (time of the newest plotted sample); left edge
+        # = that time minus hours*3600. Stale data shifts the whole window so
+        # labels match the trace, not wall-clock "now".
         # Points older than the window get pegged to the left edge (we
         # don't expect this in practice; the daemon trims to ~12h).
         span = self._hours * 3600.0
-        age = max(0.0, min(span, now_seconds - ts_seconds))
+        age = max(0.0, min(span, ref_seconds - ts_seconds))
         frac = 1.0 - (age / span)
         return plot.origin.x + frac * plot.size.width
 
@@ -205,14 +210,14 @@ class GlucoseGraphView(NSView):
 
     def _draw_x_labels(self, plot) -> None:
         attrs = self._small_text_attrs()
-        # Three ticks: window start, midpoint, now — localized short time (same
-        # instants as _x_for / _draw_line); 12h vs 24h matches System Settings.
-        now_s = datetime.now(UTC).timestamp()
+        # Window ends at newest sample — same refs as _x_for / _draw_line — so axis
+        # times match stale data ("Refresh … ago"), not wall-clock now.
+        end_s = self._plot_window_end_seconds()
         span_s = float(self._hours * 3600)
-        frac_ts: list[tuple[float, float]] = [(0.0, now_s - span_s)]
+        frac_ts: list[tuple[float, float]] = [(0.0, end_s - span_s)]
         if self._hours >= 2:
-            frac_ts.append((0.5, now_s - span_s / 2.0))
-        frac_ts.append((1.0, now_s))
+            frac_ts.append((0.5, end_s - span_s / 2.0))
+        frac_ts.append((1.0, end_s))
         labels = [(frac, _local_short_time_axis_label(ts)) for frac, ts in frac_ts]
         # Sit inside the bottom margin band (height = _PLOT_EDGE_INSET_Y).
         widest = max((t for _f, t in labels), key=lambda s: len(s))
@@ -233,7 +238,7 @@ class GlucoseGraphView(NSView):
             attr.drawAtPoint_(NSMakePoint(draw_x, axis_y))
 
     def _draw_line(self, plot) -> None:
-        now_s = datetime.now(UTC).timestamp()
+        ref_s = self._plot_window_end_seconds()
         path = NSBezierPath.bezierPath()
         path.setLineWidth_(_LINE_WIDTH)
         # Round joins keep direction changes from looking jagged at this size.
@@ -241,12 +246,12 @@ class GlucoseGraphView(NSView):
         left_x = plot.origin.x
         first = True
         for ts_s, value in self._points:
-            x = self._x_for(plot, ts_s, now_s)
+            x = self._x_for(plot, ts_s, ref_s)
             y = self._y_for(plot, value)
             point = NSMakePoint(x, y)
             if first:
-                # Oldest sample may be newer than "-{hours}h"; without a lead-in the
-                # trace would start inset while "Now" still hugs the right edge.
+                # Oldest sample may be newer than the window start; without a lead-in the
+                # trace would start inset while the newest sample hugs the right edge.
                 if x > left_x + 0.5:
                     path.moveToPoint_(NSMakePoint(left_x, y))
                     path.lineToPoint_(point)
@@ -259,9 +264,9 @@ class GlucoseGraphView(NSView):
         path.stroke()
 
     def _draw_latest_dot(self, plot) -> None:
-        now_s = datetime.now(UTC).timestamp()
+        ref_s = self._plot_window_end_seconds()
         ts_s, value = self._points[-1]
-        x = self._x_for(plot, ts_s, now_s)
+        x = self._x_for(plot, ts_s, ref_s)
         y = self._y_for(plot, value)
         rect = NSMakeRect(
             x - _DOT_RADIUS, y - _DOT_RADIUS, _DOT_RADIUS * 2, _DOT_RADIUS * 2
