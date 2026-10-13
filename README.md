@@ -12,6 +12,35 @@ viewer tied to the same account data.
 For internals and future direction, see `ENGINEERING.md`.  
 For releases, see `RELEASING.md`.
 
+## Important: your phone must stay connected
+
+GlucoBar does **not** talk to your sensor. It only shows what your phone has
+already uploaded to LibreView:
+
+```
+Libre sensor ──Bluetooth──▶ Libre app on your phone ──internet──▶ LibreView ──▶ GlucoBar
+```
+
+If any link in that chain breaks, GlucoBar stops getting new readings. For
+GlucoBar to stay current, **all of the following must be true, all the time**:
+
+- The official Libre app (FreeStyle LibreLink / FreeStyle Libre 3) is
+  **running on your phone** — open or in the background. Do not force-quit it
+  (on iPhone, don't swipe it away in the app switcher).
+- **Bluetooth is on** and the phone is **within Bluetooth range of the
+  sensor** (keep it with you, not in another room).
+- The phone has a working **internet connection** (Wi-Fi or mobile data) so
+  the app can upload to LibreView.
+- The phone is not blocking the app in the background — for example, Low
+  Power Mode / battery saver, background app refresh turned off, or
+  aggressive battery optimisation on Android can delay or stop uploads.
+- The sensor is active (not warming up, expired, or failed) and you have
+  accepted any pending Terms/Privacy prompts in the Libre app.
+
+When readings stop arriving, GlucoBar keeps showing the last value with an
+asterisk (for example `124 ↗*`) once it is more than 6 minutes old. **Treat a
+starred value as out of date** — check your phone or meter instead.
+
 ## Disclaimer
 
 GlucoBar is **not a medical device** and must not be used for diagnosis,
@@ -41,10 +70,48 @@ liability (see the disclaimer above).
 
 - macOS 11+
 - Python 3.11+
-- Active Libre sensor + LibreLink phone app uploading to LibreView
+- Active Libre sensor + LibreLink phone app uploading to LibreView — the
+  phone app must stay running, with Bluetooth and internet on (see
+  [Important: your phone must stay connected](#important-your-phone-must-stay-connected))
 - LibreView account credentials
 
 
+
+## Install from a GitHub release
+
+1. Download `GlucoBar-vX.Y.Z-macos.zip` from the
+   [Releases](https://github.com/edusantosdev/glucobar-python/releases) page.
+   Optionally check it against the `.sha256` file:
+   `shasum -a 256 -c GlucoBar-vX.Y.Z-macos.zip.sha256`
+2. Unzip it and move `GlucoBar.app` to `/Applications`.
+3. Open it (see below for the first-launch warning).
+
+### First launch: "Apple could not verify…" warning
+
+Release builds are **not signed with an Apple Developer ID and not notarized
+by Apple**. Notarization is Apple's automated malware scan for apps
+distributed outside the App Store, and it requires a paid Apple Developer
+account. It is not a code review. Without it, Gatekeeper blocks the first
+launch with a message like *"GlucoBar" Not Opened* or *Apple could not verify
+"GlucoBar" is free of malware*. This does not mean the app was found to be
+harmful; macOS just has no Apple-issued signature to check.
+
+To open it anyway (needed only once per downloaded version):
+
+- **macOS 15 Sequoia and later:** try to open the app, dismiss the warning,
+  then go to **System Settings → Privacy & Security**, scroll down to the
+  message about GlucoBar, click **Open Anyway**, and confirm.
+- **macOS 14 and earlier:** right-click (or Control-click) `GlucoBar.app` in
+  Finder, choose **Open**, then click **Open** in the dialog.
+- **Terminal alternative (any version):** remove the download quarantine flag:
+
+  ```bash
+  xattr -dr com.apple.quarantine /Applications/GlucoBar.app
+  ```
+
+Only do this for a zip you downloaded from this repository's Releases page.
+If you'd rather not trust a prebuilt binary, build the app from source
+(below). It's the same code, built on your own machine.
 
 ## Build and run (`.app`)
 
@@ -145,6 +212,11 @@ For the full release flow (tag, publish, update tap), see `RELEASING.md`.
 
 ## Troubleshooting
 
+- Value has a `*` / readings stopped updating: the problem is almost always on
+the phone side. Open the Libre app on your phone and check that it shows a
+current reading, Bluetooth is on, the phone is near the sensor and online, and
+the app wasn't force-quit. Once the phone uploads again, GlucoBar catches up
+on its next poll.
 - Account/region issues: run `.venv/bin/python scripts/phase0_probe.py`.
 - Missing credentials: open the app once or run `.venv/bin/python scripts/set_credentials.py`.
 - Rebuilt venv / upgraded Python: rerun `scripts/build_portable_app.sh`.
