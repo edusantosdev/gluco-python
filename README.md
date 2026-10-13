@@ -153,8 +153,9 @@ Release builds are **not signed with an Apple Developer ID and not notarized
 by Apple**. Notarization is Apple's automated malware scan for apps
 distributed outside the App Store, and it requires a paid Apple Developer
 account. It is not a code review. Without it, Gatekeeper blocks the first
-launch with a message like *"GlucoBar" Not Opened* or *Apple could not verify
-"GlucoBar" is free of malware*. This does not mean the app was found to be
+launch with *"GlucoBar.app" Not Opened: Apple could not verify
+"GlucoBar.app" is free of malware…* and only **Move to Trash** / **Done**
+buttons. Click **Done**, not Move to Trash. This does not mean the app was found to be
 harmful; macOS just has no Apple-issued signature to check.
 
 To open it anyway (needed only once per downloaded version):
