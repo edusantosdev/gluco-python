@@ -125,8 +125,13 @@ phone app must stay running, with Bluetooth and internet on (see
 
 ```bash
 brew tap edusantosdev/glucobar https://github.com/edusantosdev/glucobar-python
-brew install --cask gluco-bar
+brew trust --cask edusantosdev/glucobar/gluco-bar
+brew install --cask edusantosdev/glucobar/gluco-bar
 ```
+
+Recent Homebrew versions refuse to load casks from third-party taps until you
+trust them; `brew trust` does that for this one cask only. If your Homebrew
+says `Unknown command: trust`, it's older and you can skip that line.
 
 Upgrade later with `brew upgrade --cask gluco-bar`. The first-launch
 warning below still applies to Homebrew installs.

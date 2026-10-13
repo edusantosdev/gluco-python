@@ -65,8 +65,9 @@ Commit and push to `main`.
 
 ```bash
 brew tap edusantosdev/glucobar https://github.com/edusantosdev/glucobar-python
+brew trust --cask edusantosdev/glucobar/gluco-bar
 brew update
-brew install --cask gluco-bar
+brew install --cask edusantosdev/glucobar/gluco-bar
 open -a GlucoBar
 ```
 
