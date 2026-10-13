@@ -43,10 +43,11 @@ Lifecycle
 then SIGKILL. Registered as an ``atexit`` hook so quitting through
 ``rumps`` → ``NSApplication terminate:`` still tears down cleanly.
 
-``restart()``: SIGTERM the child; the watchdog respawns it within
-one throttle interval. Clears the sticky-config-error state so a
-daemon that died with exit 78 can be brought back after credentials
-have been fixed.
+``restart()``: SIGTERM the child and wait for it to exit; the watchdog
+respawns it within one throttle interval. Clears the sticky
+config-error state so a daemon that died with exit 78 can be brought
+back after credentials have been fixed, and revives the watchdog if it
+had given up after too many crashes.
 
 Tests
 -----
@@ -326,11 +327,18 @@ class DaemonSupervisor:
         self._close_log_files()
 
     def restart(self) -> None:
-        """Ask the watchdog to respawn the daemon.
+        """Respawn the daemon and block until the old process has exited.
 
-        Only meaningful in managed mode. In external mode the caller
-        should fall back to ``launchctl kickstart`` (see
-        :func:`request_restart`).
+        Only meaningful in managed mode; in external mode this is a no-op
+        (see :func:`request_restart`). Blocking until the old child is
+        gone means a caller polling the daemon right afterwards can't read
+        the *old* process's status (e.g. a stale ``auth_failed`` from the
+        previous credentials). Call from a worker thread, not the UI.
+
+        If the watchdog has given up (crash limit hit, or a respawn
+        failed), this also clears the crash history, spawns a fresh child
+        and restarts the watchdog, so an explicit user action can always
+        bring the daemon back.
         """
         with self._lock:
             if self._mode != self.MODE_MANAGED:
@@ -338,12 +346,26 @@ class DaemonSupervisor:
                 return
             self._config_error = False  # Let the watchdog try again.
             child = self._child
+            watchdog_alive = self._watchdog is not None and self._watchdog.is_alive()
+            if not watchdog_alive:
+                self._recent_exits.clear()
+
         if child is not None and child.poll() is None:
             log.info("Restarting supervised daemon (pid=%s)", child.pid)
             try:
                 os.killpg(os.getpgid(child.pid), signal.SIGTERM)
             except (ProcessLookupError, PermissionError) as e:
                 log.warning("Could not SIGTERM daemon pid=%s: %s", child.pid, e)
+            else:
+                try:
+                    child.wait(timeout=self._config.shutdown_timeout_seconds)
+                except subprocess.TimeoutExpired:
+                    log.warning("Daemon pid=%s still running after SIGTERM", child.pid)
+
+        if not watchdog_alive:
+            log.info("Watchdog inactive; spawning a fresh daemon")
+            self._respawn()
+            self._start_watchdog()
 
     # --- internals -------------------------------------------------------
 
@@ -529,11 +551,10 @@ class DaemonSupervisor:
         # a new pipe — no leaks across respawn cycles.
         self._close_parent_pipe()
         read_fd, write_fd = os.pipe()
-        # The write end must survive across an exec in the parent
-        # (it does by default — close-on-exec=False for os.pipe()
-        # on macOS/Linux), and must NOT be inherited by any other
-        # children. os.pipe() gives us CLOEXEC=False on all POSIX;
-        # that's what we want since we're the ones holding it.
+        # ``os.pipe()`` fds are non-inheritable (PEP 446). That's what we
+        # want for the write end: if the child inherited a copy it would
+        # never see EOF. The read end is handed over explicitly via
+        # ``pass_fds`` below.
         self._parent_pipe_write_fd = write_fd
 
         child_env = os.environ.copy()

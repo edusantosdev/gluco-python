@@ -12,10 +12,12 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
+import requests
 from pylibrelinkup import (
     APIUrl,
     AuthenticationError,
     LLUAPIRateLimitError,
+    RedirectError,
 )
 
 from daemon.backoff import ExponentialBackoff, seed_for_tests
@@ -84,6 +86,7 @@ class FakeClient:
         self.read_calls = 0
         # Test-controlled behaviour:
         self.auth_raises: Exception | None = None
+        self.auth_raises_once: Exception | None = None
         self.get_patients_result: list = field(default_factory=list)  # type: ignore[assignment]
         self.get_patients_raises: Exception | None = None
         self.read_queue: list = []  # pop(0) each call; Exception → raise
@@ -93,6 +96,9 @@ class FakeClient:
         self.authenticate_calls += 1
         if self.auth_raises is not None:
             raise self.auth_raises
+        if self.auth_raises_once is not None:
+            err, self.auth_raises_once = self.auth_raises_once, None
+            raise err
         # Simulate a successful auth setting token + hash.
         self.token = "eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjk5OTk5OTk5OTl9.sig"
         self.account_id_hash = "deadbeef"
@@ -111,6 +117,13 @@ class FakeClient:
         if isinstance(item, Exception):
             raise item
         return item
+
+
+def _http_error(status: int) -> requests.HTTPError:
+    """What ``pylibrelinkup`` raises for any non-429 error response."""
+    response = requests.Response()
+    response.status_code = status
+    return requests.HTTPError(f"{status} error", response=response)
 
 
 # --- fixtures ---
@@ -286,6 +299,50 @@ def test_tick_retries_once_on_auth_error(service: GlucoseService) -> None:
     assert service.snapshot().status == Status.OK
     # authenticate() called twice: initial + one refresh.
     assert service.client.authenticate_calls == 2
+
+
+def test_tick_reauths_on_http_401(service: GlucoseService) -> None:
+    """An expired JWT surfaces as ``requests.HTTPError`` 401, not AuthenticationError."""
+    assert service._authenticate_once()
+    service.client.read_queue.append(_http_error(401))
+    service.client.read_queue.append(_fake_graph_response(reading_age_seconds=30))
+    delay = service._tick()
+    assert service.snapshot().status == Status.OK
+    assert delay == service.poll_interval
+    assert service.client.authenticate_calls == 2
+
+
+def test_tick_marks_http_server_errors_as_error_not_offline(
+    service: GlucoseService,
+) -> None:
+    """``HTTPError`` subclasses ``OSError``; a 5xx must not read as "Offline"."""
+    assert service._authenticate_once()
+    service.client.read_queue.append(_http_error(502))
+    service._tick()
+    assert service.snapshot().status == Status.ERROR
+    assert service.client.authenticate_calls == 1
+
+
+def test_authenticate_follows_region_redirect(service: GlucoseService) -> None:
+    service.client.auth_raises_once = RedirectError(APIUrl.EU)
+    assert service._authenticate_once() is True
+    assert service._region == APIUrl.EU
+    assert service.client.authenticate_calls == 2
+
+
+def test_warmup_clears_previous_reading(service: GlucoseService) -> None:
+    """A new sensor's warm-up must not keep serving the old sensor's reading."""
+    assert service._authenticate_once()
+    service.client.read_queue.append(_fake_graph_response(reading_age_seconds=30))
+    service._tick()
+    assert service.snapshot().reading is not None
+    service.client.read_queue.append(
+        _fake_graph_response(history=[], activation_offset_seconds=-600)
+    )
+    service._tick()
+    snap = service.snapshot()
+    assert snap.status == Status.WARMING_UP
+    assert snap.reading is None
 
 
 def test_tick_uses_backoff_on_network_error(service: GlucoseService) -> None:

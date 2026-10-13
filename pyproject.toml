@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,18 +7,20 @@ name = "gluco-bar"
 version = "1.0.0"
 description = "GlucoBar — macOS menubar glucose display backed by LibreView."
 readme = "README.md"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.11"
 keywords = ["glucose", "libreview", "librelinkup", "menubar", "macos", "cgm", "freestyle-libre"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Environment :: MacOS X",
     "Intended Audience :: End Users/Desktop",
-    "License :: OSI Approved :: Apache Software License",
     "Operating System :: MacOS :: MacOS X",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Utilities",
 ]
 # All four runtime components — daemon HTTP server, polling client,

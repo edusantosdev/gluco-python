@@ -271,7 +271,6 @@ class GlucoseGraphView(NSView):
         rect = NSMakeRect(
             x - _DOT_RADIUS, y - _DOT_RADIUS, _DOT_RADIUS * 2, _DOT_RADIUS * 2
         )
-        NSBezierPath.bezierPathWithOvalInRect_(rect)
         # Keep the latest point visually tied to the line colour.
         NSColor.labelColor().setFill()
         NSBezierPath.bezierPathWithOvalInRect_(rect).fill()
@@ -294,18 +293,6 @@ class GlucoseGraphView(NSView):
         )
 
     # --- helpers ---
-
-    def _color_for_value(self, value: float):
-        t = self._thresholds
-        if t is None:
-            return NSColor.labelColor()
-        if value < t.low:
-            return NSColor.systemRedColor()
-        if value > t.very_high:
-            return NSColor.systemOrangeColor()
-        if value > t.high:
-            return NSColor.systemYellowColor()
-        return NSColor.systemGreenColor()
 
     def _zone_key_for_value(self, value: float) -> str:
         t = self._thresholds
@@ -341,7 +328,6 @@ class GlucoseGraphView(NSView):
             if zone_key == active_zone:
                 return band
         return None
-
 
     @staticmethod
     def _small_text_attrs(size: float = 9) -> dict:

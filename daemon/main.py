@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
 
 # Allow running as ``python -m daemon`` from the repo root.
@@ -227,12 +227,12 @@ async def current() -> CurrentResponse:
 
 
 @app.get("/glucose/graph", response_model=list[GraphPoint])
-async def graph(hours: int = 8) -> list[GraphPoint]:
+async def graph(hours: int = Query(default=8, ge=1, le=24)) -> list[GraphPoint]:
     """Return cached historical readings, oldest first.
 
     Reads from the in-memory snapshot the poll loop maintains — no extra
-    Abbott round-trip. ``hours`` is a client-side trim against whatever
-    window the daemon happens to retain (currently 12h). Returns an empty
+    Abbott round-trip. ``hours`` trims whatever window the daemon happens
+    to retain (currently 12h). Returns an empty
     list if no successful poll has happened yet.
     """
     snap = _service.snapshot()

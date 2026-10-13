@@ -85,6 +85,7 @@ class CurrentReading:
 
 class DaemonClient:
     def __init__(self, base_url: str = "http://127.0.0.1:8765", timeout: float = 5.0):
+        self._base_url = base_url
         self._client = httpx.Client(base_url=base_url, timeout=timeout)
         self._lock = threading.Lock()
 
@@ -118,9 +119,15 @@ class DaemonClient:
         resp.raise_for_status()
         return CurrentReading.from_payload(resp.json())
 
-    def force_refresh(self) -> dict[str, Any]:
-        with self._lock:
-            resp = self._client.post("/auth/refresh")
+    def force_refresh(self, timeout: float = 30.0) -> dict[str, Any]:
+        """POST ``/auth/refresh``: full LibreView re-login plus one poll.
+
+        That is several Abbott round-trips, so it gets a longer timeout and
+        its own short-lived client: holding ``self._lock`` that long would
+        stall the main-thread ``current()`` polls behind it.
+        """
+        with httpx.Client(base_url=self._base_url, timeout=timeout) as client:
+            resp = client.post("/auth/refresh")
         resp.raise_for_status()
         return resp.json()
 

@@ -209,6 +209,44 @@ def test_config_error_is_sticky_until_restart(tmp_path):
         sup.stop()
 
 
+def test_restart_revives_watchdog_after_crash_limit(tmp_path):
+    """Once the watchdog gives up, an explicit restart() must still work."""
+    children: list[FakeChild] = []
+
+    def spawn(argv, cwd, stdout, stderr, **kwargs):  # noqa: ANN001
+        c = FakeChild()
+        children.append(c)
+        return c
+
+    sup = DaemonSupervisor(
+        _base_config(tmp_path),
+        probe_fn=_always_unreachable,
+        spawn_fn=spawn,
+    )
+    sup.start()
+    try:
+        # Crash every child until the watchdog hits the crash limit.
+        while sup._watchdog.is_alive():
+            spawned = len(children)
+            children[-1].simulate_exit(1)
+            deadline = time.monotonic() + 2.0
+            while (
+                time.monotonic() < deadline
+                and len(children) == spawned
+                and sup._watchdog.is_alive()
+            ):
+                time.sleep(0.02)
+            assert time.monotonic() < deadline, "watchdog neither respawned nor gave up"
+        gave_up_at = len(children)
+
+        sup.restart()
+        assert len(children) == gave_up_at + 1, "restart() did not spawn a new daemon"
+        assert sup._watchdog.is_alive(), "restart() did not revive the watchdog"
+    finally:
+        children[-1].simulate_exit(0)
+        sup.stop()
+
+
 def test_stop_is_idempotent_in_external_mode(tmp_path):
     """External mode doesn't own a child, so stop() is a no-op."""
     sup = DaemonSupervisor(

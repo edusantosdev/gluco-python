@@ -19,9 +19,10 @@ Robustness features
 * :class:`ExponentialBackoff` for network errors and rate-limit waits,
   with a dedicated instance per failure mode so one doesn't penalise
   the other.
-* One-shot auth refresh on ``AuthenticationError`` inside a poll — we
-  drop the cached JWT, re-authenticate, retry once, and then fall
-  through to backoff if that still fails.
+* One-shot auth refresh when a poll is rejected as unauthenticated
+  (``AuthenticationError`` or an HTTP 401/403) — we drop the cached
+  JWT, re-authenticate, retry once, and then fall through to backoff
+  if that still fails.
 * Sensor warm-up detection from the ``Sensor`` metadata (``a`` +
   ``w``-minutes vs now).
 """
@@ -41,6 +42,7 @@ from pylibrelinkup import (
     LLUAPIRateLimitError,
     PrivacyPolicyError,
     PyLibreLinkUp,
+    RedirectError,
     TermsOfUseError,
 )
 
@@ -62,6 +64,27 @@ _BACKOFF_ON_TOS_SECONDS = 300
 _HISTORY_RETAIN_HOURS = 12
 
 
+def _http_status(exc: Exception) -> int | None:
+    """HTTP status code carried by a ``requests.HTTPError``, if any.
+
+    ``pylibrelinkup`` only maps 429 to its own exception type; every other
+    non-2xx response surfaces as a bare ``requests.HTTPError``. Duck-typed so
+    we don't import ``requests`` (a transitive dependency) directly.
+    """
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    return status if isinstance(status, int) else None
+
+
+def _is_auth_rejection(exc: Exception) -> bool:
+    """True when the API rejected our token (expired, revoked, or never set).
+
+    ``pylibrelinkup`` raises ``AuthenticationError`` only when no token is
+    set; an expired/revoked JWT comes back as an HTTP 401 (or 403).
+    """
+    return isinstance(exc, AuthenticationError) or _http_status(exc) in (401, 403)
+
+
 def _is_network_failure(exc: Exception) -> bool:
     """Best-effort check for transport/connectivity failures.
 
@@ -69,12 +92,11 @@ def _is_network_failure(exc: Exception) -> bool:
     as ``NO_NETWORK``. Everything else becomes ``ERROR`` so UI messaging
     doesn't claim the internet is down when the issue is elsewhere.
     """
-    network_types: tuple[type[BaseException], ...] = (
-        ConnectionError,
-        TimeoutError,
-        OSError,
-    )
-    if isinstance(exc, network_types):
+    if _http_status(exc) is not None:
+        # The server answered; whatever went wrong, the network is fine.
+        # (``requests.HTTPError`` subclasses ``OSError``, so check first.)
+        return False
+    if isinstance(exc, OSError):  # includes ConnectionError / TimeoutError
         return True
     # Some third-party clients wrap transport failures in generic exceptions;
     # look for common cues before falling back to non-network.
@@ -112,7 +134,7 @@ class GlucoseService:
         self.poll_interval = poll_interval
         self.stale_after = stale_after_seconds
 
-        self.client = PyLibreLinkUp(email=email, password=password, api_url=region)
+        self._new_client()
         self.patient = None
 
         self._state = DaemonState()
@@ -140,13 +162,14 @@ class GlucoseService:
             # round-trip but at least we skip the password submission.
             try:
                 self._load_patient()
-            except AuthenticationError:
-                # Cached token turned out to be invalid — purge and re-auth.
-                self._clear_session()
-                self._authenticate_once(force=True)
             except Exception as e:  # noqa: BLE001
-                log.warning("Post-restore patient fetch failed: %s", e)
-                # Leave self.patient = None; _tick will re-attempt.
+                if _is_auth_rejection(e):
+                    # Cached token turned out to be invalid — purge and re-auth.
+                    self._clear_session()
+                    self._authenticate_once(force=True)
+                else:
+                    log.warning("Post-restore patient fetch failed: %s", e)
+                    # Leave self.patient = None; _tick will re-attempt.
         else:
             if not self._authenticate_once():
                 log.warning(
@@ -173,10 +196,8 @@ class GlucoseService:
         """Return a thread-safe shallow copy of current state."""
         with self._lock:
             # ``replace`` produces a new instance; the embedded ``reading``
-            # reference is shared but immutable in practice.
-            snap = replace(self._state)
-            snap.reading = self._state.reading  # explicit, not deep-copied
-            return snap
+            # and ``history`` references are shared but never mutated.
+            return replace(self._state)
 
     def force_refresh(self) -> DaemonState:
         """Re-authenticate (dropping any cached session) and poll once.
@@ -194,16 +215,22 @@ class GlucoseService:
         return self.snapshot()
 
     def patient_snapshot(self) -> tuple[str, str, str | None] | None:
-        """Return immutable patient identity fields, if known."""
-        with self._client_lock:
-            if self.patient is None:
-                return None
-            p = self.patient
-            return (
-                str(getattr(p, "first_name", "") or ""),
-                str(getattr(p, "last_name", "") or ""),
-                str(getattr(p, "patient_id", "") or "") or None,
-            )
+        """Return immutable patient identity fields, if known.
+
+        Deliberately lock-free: ``_client_lock`` is held across LibreView
+        network calls, and this is called from an async route handler, so
+        waiting on it would stall the whole event loop. Reading the
+        ``self.patient`` reference is atomic, and we never mutate the
+        object it points at.
+        """
+        p = self.patient
+        if p is None:
+            return None
+        return (
+            str(getattr(p, "first_name", "") or ""),
+            str(getattr(p, "last_name", "") or ""),
+            str(getattr(p, "patient_id", "") or "") or None,
+        )
 
     # --- internals: state mutation ---
 
@@ -211,7 +238,8 @@ class GlucoseService:
         self,
         *,
         status: Status | None = None,
-        reading: object | None = None,
+        # ``...`` means "leave unchanged" so callers can clear with ``None``.
+        reading: object | None = ...,  # type: ignore[assignment]
         fetched_at: datetime | None = None,
         last_error: str | None = ...,  # type: ignore[assignment]
         history: list[tuple[datetime, float]] | None = None,
@@ -221,7 +249,7 @@ class GlucoseService:
         with self._lock:
             if status is not None:
                 self._state.status = status
-            if reading is not None:
+            if reading is not ...:
                 self._state.reading = reading
             if fetched_at is not None:
                 self._state.fetched_at = fetched_at
@@ -287,15 +315,31 @@ class GlucoseService:
         )
         self._set_state(last_error=None)
 
+    def _new_client(self) -> None:
+        self.client = PyLibreLinkUp(
+            email=self._email, password=self._password, api_url=self._region
+        )
+
     def _authenticate_once(self, *, force: bool = False) -> bool:
         """Do a full login round-trip. Persist the new session on success."""
         try:
             if force:
                 # Re-instantiate so any cached JWT inside the client is dropped.
-                self.client = PyLibreLinkUp(
-                    email=self._email, password=self._password, api_url=self._region
+                self._new_client()
+            try:
+                self.client.authenticate()
+            except RedirectError as e:
+                # The account lives on another regional cluster (e.g. the
+                # locale-based region guess was wrong). Follow it once.
+                log.warning(
+                    "LibreView redirected login to region %s; set LIBREVIEW_REGION=%s "
+                    "to skip this hop",
+                    e.region.name,
+                    e.region.name,
                 )
-            self.client.authenticate()
+                self._region = e.region
+                self._new_client()
+                self.client.authenticate()
             self._persist_session()
             self._load_patient()
             return self.patient is not None
@@ -350,19 +394,6 @@ class GlucoseService:
                 self._error_backoff.reset()
                 self._ratelimit_backoff.reset()
                 return self.poll_interval
-            except AuthenticationError:
-                # JWT expired mid-session. Drop the cached one and try once more
-                # right now — if that also fails, fall through to normal backoff.
-                log.info("Auth expired; refreshing and retrying once")
-                self._clear_session()
-                if self._authenticate_once(force=True):
-                    try:
-                        self._poll_once()
-                        self._error_backoff.reset()
-                        return self.poll_interval
-                    except Exception as e:  # noqa: BLE001
-                        self._handle_poll_error(e)
-                return self._error_backoff.next_delay()
             except LLUAPIRateLimitError as e:
                 retry = getattr(e, "retry_after", None)
                 # Trust the server hint when provided; fall back to our own
@@ -380,7 +411,22 @@ class GlucoseService:
                 )
                 return _BACKOFF_ON_TOS_SECONDS
             except Exception as e:  # noqa: BLE001
-                self._handle_poll_error(e)
+                if not _is_auth_rejection(e):
+                    self._handle_poll_error(e)
+                    return self._error_backoff.next_delay()
+                # JWT expired or revoked mid-session. Drop the cached one and
+                # try once more right now — if that also fails, fall through
+                # to normal backoff.
+                log.info("Auth rejected (%s); refreshing and retrying once", e)
+                self._clear_session()
+                if self._authenticate_once(force=True):
+                    try:
+                        self._poll_once()
+                        self._error_backoff.reset()
+                        self._ratelimit_backoff.reset()
+                        return self.poll_interval
+                    except Exception as retry_error:  # noqa: BLE001
+                        self._handle_poll_error(retry_error)
                 return self._error_backoff.next_delay()
 
     def _poll_once(self) -> None:

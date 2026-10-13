@@ -968,17 +968,6 @@ def _refresh_secondary_label(age_seconds: int) -> str:
     return _humanize_age(age_seconds)
 
 
-def _to_local_hhmm(timestamp_iso: str | None) -> str:
-    if not timestamp_iso:
-        return "—"
-    try:
-        # Daemon sends UTC with trailing Z.
-        dt = datetime.fromisoformat(timestamp_iso.replace("Z", "+00:00"))
-        return dt.astimezone().strftime("%H:%M")
-    except Exception:  # noqa: BLE001
-        return "—"
-
-
 def _parse_sensor_timestamp(timestamp_iso: str | None) -> datetime | None:
     """Parse the daemon's UTC sensor timestamp into an aware ``datetime``."""
     if not timestamp_iso:
@@ -1613,7 +1602,9 @@ class GlucoseApp(rumps.App):
             log.info("Refresh clicked while logged out; opening sign-in flow")
             _run_in_background(self._first_run_credentials_impl)
             return
-        self._session_refresh_then_tick(log_label="Refresh")
+        # Re-auth + poll takes several LibreView round-trips; keep it off
+        # the main thread so the menubar doesn't beachball meanwhile.
+        _run_in_background(lambda: self._session_refresh_then_tick(log_label="Refresh"))
 
     def _on_logout_credentials(self, _sender) -> None:
         log.info("Sign out clicked")
@@ -1866,8 +1857,8 @@ end run
             _run_on_main_and_wait(self._set_signing_in_state)
             # Kick the daemon so it re-authenticates with the new credentials
             # right away, instead of either waiting for its next poll (if
-            # already running under the old creds) or for launchd's throttled
-            # respawn (if it exited on missing-credentials before first run).
+            # already running under the old creds) or staying parked in the
+            # supervisor's sticky EX_CONFIG state.
             _kickstart_daemon()
             status = self._check_sign_in_status_after_restart()
             if not self._handle_post_sign_in_status(status):
