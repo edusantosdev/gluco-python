@@ -35,12 +35,16 @@ transitive licenses.
 Apache-2.0. It is not a substitute for professional legal advice about
 liability (see the disclaimer above).
 
+
+
 ## Requirements
 
 - macOS 11+
 - Python 3.11+
 - Active Libre sensor + LibreLink phone app uploading to LibreView
 - LibreView account credentials
+
+
 
 ## Build and run (`.app`)
 
@@ -74,6 +78,8 @@ Verify account + region quickly:
 .venv/bin/python scripts/phase0_probe.py
 ```
 
+
+
 ## Runtime
 
 The menubar supervises the daemon as a child process. If a daemon is
@@ -96,6 +102,8 @@ Menu actions:
 - `Sign In to / Sign Out of LibreView Account` — manage Keychain credentials
 - `About GlucoBar` — version, author, repository link, license, and disclaimer
 - `Quit`
+
+
 
 ## Configuration
 
@@ -123,6 +131,8 @@ Fixed runtime defaults:
 - stale cutoff: 360s
 - color thresholds: `<70`, `70-180`, `180-250`, `>250` mg/dL
 
+
+
 ## Packaging for releases
 
 Create release zip + SHA:
@@ -148,6 +158,8 @@ comment lines still trigger globbing, avoid comments in pasted blocks or enable
 `setopt interactivecomments` in your shell.
 - "Another glucose daemon is already running": stop any manual `python -m daemon`, then relaunch.
 - Check daemon logs: tail `~/.glucobar/daemon.log`.
+
+
 
 ## Development
 
