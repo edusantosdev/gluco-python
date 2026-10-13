@@ -4,7 +4,7 @@ GlucoBar is distributed under the **Apache License 2.0**. See `LICENSE` and `NOT
 
 ## App icon (graphic asset)
 
-The droplet shape used for `GlucoBar.icns` and the Icon Composer icon `GlucoBar.icon` is from **`scripts/app_bundle/drop-svgrepo-com.svg`**, published via [SVG Repo](https://www.svgrepo.com/). Licensing varies by individual asset; confirm the terms that apply to this file on SVG Repo or the original artist page before you redistribute.
+The droplet shape used for `GlucoBar.icns` and the Icon Composer icon `GlucoBar.icon` is from **`scripts/app_bundle/drop-svgrepo-com.svg`**, the [“Drop” icon on SVG Repo](https://www.svgrepo.com/svg/478761/drop) (SVG Repo #478761). SVG Repo lists this asset under its [Public Domain (PD) license](https://www.svgrepo.com/page/licensing/#PD), so it can be used, modified, and redistributed without attribution; it is credited here as a courtesy.
 
 `scripts/build_glucobar_icns.py` rasterizes that path with AppKit and runs Apple’s `iconutil` to produce the `.icns` file.
 
