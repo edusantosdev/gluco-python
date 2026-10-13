@@ -141,6 +141,12 @@ build_app_bundle() {
         echo "  .venv/bin/python scripts/build_glucobar_icns.py" >&2
     fi
 
+    # Liquid Glass icon for macOS 26+ (see ``scripts/compile_app_icon.sh``).
+    rm -f "${contents}/Resources/Assets.car"
+    if "${REPO_ROOT}/scripts/compile_app_icon.sh" "${contents}/Resources"; then
+        plutil -replace CFBundleIconName -string GlucoBar "${contents}/Info.plist"
+    fi
+
     # ``CFBundleExecutable`` in Info.plist is ``GlucoBar``; keep a real
     # executable file in ``Contents/MacOS`` so process path remains inside
     # the bundle (symlinks can resolve to .venv/bin/python and lose bundle

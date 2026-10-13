@@ -4,15 +4,19 @@ GlucoBar is distributed under the **Apache License 2.0**. See `LICENSE` and `NOT
 
 ## App icon (graphic asset)
 
-The droplet shape used for `GlucoBar.icns` is from **`scripts/app_bundle/drop-svgrepo-com.svg`**, published via [SVG Repo](https://www.svgrepo.com/). Licensing varies by individual asset; confirm the terms that apply to this file on SVG Repo or the original artist page before you redistribute.
+The droplet shape used for `GlucoBar.icns` and the Icon Composer icon `GlucoBar.icon` is from **`scripts/app_bundle/drop-svgrepo-com.svg`**, published via [SVG Repo](https://www.svgrepo.com/). Licensing varies by individual asset; confirm the terms that apply to this file on SVG Repo or the original artist page before you redistribute.
 
 `scripts/build_glucobar_icns.py` rasterizes that path with AppKit and runs Apple’s `iconutil` to produce the `.icns` file.
+
+`scripts/app_bundle/GlucoBar.icon/Assets/drop.svg` is the same path, filled white and placed on a 1024×1024 canvas. `scripts/compile_app_icon.sh` compiles the `.icon` with Apple’s `actool` into the bundle’s `Assets.car` (the Liquid Glass icon on macOS 26+).
 
 ## macOS & Apple frameworks
 
 - **AppKit** and **Foundation** (system frameworks), accessed from Python through **PyObjC** (`pyobjc-framework-Cocoa` and related packages, MIT License).
 
 - **`iconutil`** (Xcode Command Line Tools) — builds `.icns` from a `.iconset`.
+
+- **`actool`** (Xcode 26+) — compiles the Icon Composer `.icon` into `Assets.car`. Optional: without it the app ships with the `.icns` only.
 
 ## Python — direct runtime dependencies
 

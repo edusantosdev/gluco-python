@@ -147,6 +147,14 @@ if [ -x "${MACOS_DIR}/python" ] && [ ! -e "${MACOS_DIR}/GlucoBarDaemon" ]; then
     chmod 0755 "${MACOS_DIR}/GlucoBarDaemon"
 fi
 
+# Liquid Glass icon for macOS 26+, compiled from the Icon Composer
+# ``GlucoBar.icon``. ``CFBundleIconName`` points macOS at it inside
+# ``Assets.car``; ``GlucoBar.icns`` stays as the fallback. Must run
+# before codesign, since it changes the bundle.
+if "${REPO_ROOT}/scripts/compile_app_icon.sh" "${APP_BUNDLE}/Contents/Resources"; then
+    plutil -replace CFBundleIconName -string GlucoBar "${APP_BUNDLE}/Contents/Info.plist"
+fi
+
 # Ad-hoc codesign the bundle so macOS treats it as a stable identity.
 # This reduces Keychain "allow?" re-prompts across future launches of
 # the same binary. Requires Xcode Command Line Tools (``codesign``).
