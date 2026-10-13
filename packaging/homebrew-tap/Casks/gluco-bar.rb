@@ -1,6 +1,6 @@
 cask "gluco-bar" do
-  version "1.0.0"
-  sha256 "197979037f9a631b6257184b674524d48b9e72d2eb0634d88fe7e58c6400c6f2"
+  version "1.0.1"
+  sha256 "a62d8b186f3dd3d3f4a9bdc1ae1dfdbe8533d8b1505d78ce3a99ef72a6707aff"
 
   url "https://github.com/edusantosdev/glucobar-python/releases/download/v#{version}/GlucoBar-v#{version}-macos.zip"
   name "GlucoBar"
