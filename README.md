@@ -41,6 +41,33 @@ When readings stop arriving, GlucoBar keeps showing the last value with an
 asterisk (for example `124 ↗*`) once it is more than 6 minutes old. **Treat a
 starred value as out of date** — check your phone or meter instead.
 
+## Known limitations
+
+- **Unofficial API that may stop working.** GlucoBar reads data through the
+  unofficial LibreLinkUp API (via
+  [`pylibrelinkup`](https://pypi.org/project/pylibrelinkup/)). Abbott has
+  released LibreLinkUp API v5, which encrypts glucose data so third-party
+  tools can't read it. GlucoBar only works while Abbott keeps the older API
+  running. When Abbott turns it off, GlucoBar (like other community LibreView
+  tools) will stop getting readings, possibly with no notice. There is no
+  plan to work around the v5 encryption.
+- **Readings are delayed.** Values go sensor → phone → LibreView → GlucoBar,
+  and GlucoBar checks LibreView every 60 seconds. Expect the menu bar to run
+  a minute or more behind your phone, and longer if the phone uploads late
+  (see [above](#important-your-phone-must-stay-connected)).
+- **No alarms.** GlucoBar does not alert, notify, or make sounds for highs or
+  lows. Keep using the official Libre app's alarms.
+- **Needs LibreLinkUp sharing.** The account you sign in with must have a
+  patient shared with it in LibreLinkUp (someone invited you, or you invited
+  yourself). An account with nothing shared shows `⚠ Sign In`.
+- **One patient only.** If several people share with the account, GlucoBar
+  shows the first one LibreView returns. There's no picker yet.
+- **Short history.** The graph covers the last 8 hours. LibreView returns
+  about 12 hours of data through this API, so there are no long-term reports.
+- **macOS only**, and release builds aren't notarized (see
+  [First launch](#first-launch-apple-could-not-verify-warning)).
+- **Not a medical device** (see below).
+
 ## Disclaimer
 
 GlucoBar is **not a medical device** and must not be used for diagnosis,
