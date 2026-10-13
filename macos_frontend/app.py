@@ -128,7 +128,7 @@ _ABOUT_TAGLINE = (
     "to pick up your phone to check."
 )
 _AUTHOR_NAME = "Eduardo Santos"
-_REPO_URL = "https://github.com/edusantosdev/librelink-glucose-menubar-python"
+_REPO_URL = "https://github.com/edusantosdev/glucobar-python"
 
 # Third-party components and artwork — shown as a link list in the About panel.
 # Keep in sync with ``pyproject.toml`` dependencies, Apple frameworks, and the icon.
