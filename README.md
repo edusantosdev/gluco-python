@@ -70,9 +70,11 @@ a minute or more behind your phone, and longer if the phone uploads late
 (see [above](#important-your-phone-must-stay-connected)).
 - **No alarms.** GlucoBar does not alert, notify, or make sounds for highs or
 lows. Keep using the official Libre app's alarms.
-- **Needs LibreLinkUp sharing.** The account you sign in with must have a
-patient shared with it in LibreLinkUp (someone invited you, or you invited
-yourself). An account with nothing shared shows `⚠ Sign In`.
+- **Signs in with your LibreView account.** Use the same email and password
+as LibreView.com. GlucoBar shows the readings LibreView makes available to
+that account through LibreLinkUp. If LibreView lists nobody for the account,
+GlucoBar shows `⚠ Sign In`; setting up sharing in the Libre app
+(Connected Apps → LibreLinkUp) usually fixes it.
 - **One patient only.** If several people share with the account, GlucoBar
 shows the first one LibreView returns. There's no picker yet.
 - **Short history.** The graph covers the last 12 hours, which is all the
