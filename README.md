@@ -3,6 +3,10 @@
 GlucoBar puts your latest glucose reading and trend in the macOS menu bar, so
 you can stay on top of your diabetes **without breaking your focus**.
 
+<p align="center">
+  <img src="assets/screenshot.png" width="500" alt="GlucoBar in the macOS menu bar showing 76 with a steady arrow, and its menu open with an 8-hour glucose graph">
+</p>
+
 Checking your phone pulls you out of whatever you're doing: unlock, open the
 app, wait, and then the notifications get you. When you're deep in work, in
 the zone, or just distracted, it's easy to put that check off and not notice
@@ -34,17 +38,17 @@ If any link in that chain breaks, GlucoBar stops getting new readings. For
 GlucoBar to stay current, **all of the following must be true, all the time**:
 
 - The official Libre app (FreeStyle LibreLink / FreeStyle Libre 3) is
-  **running on your phone** — open or in the background. Do not force-quit it
-  (on iPhone, don't swipe it away in the app switcher).
+**running on your phone** — open or in the background. Do not force-quit it
+(on iPhone, don't swipe it away in the app switcher).
 - **Bluetooth is on** and the phone is **within Bluetooth range of the
-  sensor** (keep it with you, not in another room).
+sensor** (keep it with you, not in another room).
 - The phone has a working **internet connection** (Wi-Fi or mobile data) so
-  the app can upload to LibreView.
+the app can upload to LibreView.
 - The phone is not blocking the app in the background — for example, Low
-  Power Mode / battery saver, background app refresh turned off, or
-  aggressive battery optimisation on Android can delay or stop uploads.
+Power Mode / battery saver, background app refresh turned off, or
+aggressive battery optimisation on Android can delay or stop uploads.
 - The sensor is active (not warming up, expired, or failed) and you have
-  accepted any pending Terms/Privacy prompts in the Libre app.
+accepted any pending Terms/Privacy prompts in the Libre app.
 
 When readings stop arriving, GlucoBar keeps showing the last value with an
 asterisk (for example `124 ↗*`) once it is more than 6 minutes old. **Treat a
@@ -53,29 +57,31 @@ starred value as out of date** — check your phone or meter instead.
 ## Known limitations
 
 - **Unofficial API that may stop working.** GlucoBar reads data through the
-  unofficial LibreLinkUp API (via
-  [`pylibrelinkup`](https://pypi.org/project/pylibrelinkup/)). Abbott has
-  released LibreLinkUp API v5, which encrypts glucose data so third-party
-  tools can't read it. GlucoBar only works while Abbott keeps the older API
-  running. When Abbott turns it off, GlucoBar (like other community LibreView
-  tools) will stop getting readings, possibly with no notice. There is no
-  plan to work around the v5 encryption.
+unofficial LibreLinkUp API (via
+[`pylibrelinkup`](https://pypi.org/project/pylibrelinkup/)). Abbott has
+released LibreLinkUp API v5, which encrypts glucose data so third-party
+tools can't read it. GlucoBar only works while Abbott keeps the older API
+running. When Abbott turns it off, GlucoBar (like other community LibreView
+tools) will stop getting readings, possibly with no notice. There is no
+plan to work around the v5 encryption.
 - **Readings are delayed.** Values go sensor → phone → LibreView → GlucoBar,
-  and GlucoBar checks LibreView every 60 seconds. Expect the menu bar to run
-  a minute or more behind your phone, and longer if the phone uploads late
-  (see [above](#important-your-phone-must-stay-connected)).
+and GlucoBar checks LibreView every 60 seconds. Expect the menu bar to run
+a minute or more behind your phone, and longer if the phone uploads late
+(see [above](#important-your-phone-must-stay-connected)).
 - **No alarms.** GlucoBar does not alert, notify, or make sounds for highs or
-  lows. Keep using the official Libre app's alarms.
+lows. Keep using the official Libre app's alarms.
 - **Needs LibreLinkUp sharing.** The account you sign in with must have a
-  patient shared with it in LibreLinkUp (someone invited you, or you invited
-  yourself). An account with nothing shared shows `⚠ Sign In`.
+patient shared with it in LibreLinkUp (someone invited you, or you invited
+yourself). An account with nothing shared shows `⚠ Sign In`.
 - **One patient only.** If several people share with the account, GlucoBar
-  shows the first one LibreView returns. There's no picker yet.
+shows the first one LibreView returns. There's no picker yet.
 - **Short history.** The graph covers the last 8 hours. LibreView returns
-  about 12 hours of data through this API, so there are no long-term reports.
+about 12 hours of data through this API, so there are no long-term reports.
 - **macOS only**, and release builds aren't notarized (see
-  [First launch](#first-launch-apple-could-not-verify-warning)).
+[First launch](#first-launch-apple-could-not-verify-warning)).
 - **Not a medical device** (see below).
+
+
 
 ## Disclaimer
 
@@ -107,8 +113,8 @@ liability (see the disclaimer above).
 - macOS 11+
 - Python 3.11+
 - Active Libre sensor + LibreLink phone app uploading to LibreView — the
-  phone app must stay running, with Bluetooth and internet on (see
-  [Important: your phone must stay connected](#important-your-phone-must-stay-connected))
+phone app must stay running, with Bluetooth and internet on (see
+[Important: your phone must stay connected](#important-your-phone-must-stay-connected))
 - LibreView account credentials
 
 
@@ -116,11 +122,13 @@ liability (see the disclaimer above).
 ## Install from a GitHub release
 
 1. Download `GlucoBar-vX.Y.Z-macos.zip` from the
-   [Releases](https://github.com/edusantosdev/glucobar-python/releases) page.
+  [Releases](https://github.com/edusantosdev/glucobar-python/releases) page.
    Optionally check it against the `.sha256` file:
    `shasum -a 256 -c GlucoBar-vX.Y.Z-macos.zip.sha256`
 2. Unzip it and move `GlucoBar.app` to `/Applications`.
 3. Open it (see below for the first-launch warning).
+
+
 
 ### First launch: "Apple could not verify…" warning
 
@@ -135,12 +143,11 @@ harmful; macOS just has no Apple-issued signature to check.
 To open it anyway (needed only once per downloaded version):
 
 - **macOS 15 Sequoia and later:** try to open the app, dismiss the warning,
-  then go to **System Settings → Privacy & Security**, scroll down to the
-  message about GlucoBar, click **Open Anyway**, and confirm.
+then go to **System Settings → Privacy & Security**, scroll down to the
+message about GlucoBar, click **Open Anyway**, and confirm.
 - **macOS 14 and earlier:** right-click (or Control-click) `GlucoBar.app` in
-  Finder, choose **Open**, then click **Open** in the dialog.
+Finder, choose **Open**, then click **Open** in the dialog.
 - **Terminal alternative (any version):** remove the download quarantine flag:
-
   ```bash
   xattr -dr com.apple.quarantine /Applications/GlucoBar.app
   ```
