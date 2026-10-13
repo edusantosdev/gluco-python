@@ -472,6 +472,31 @@ def _bundle_path() -> str:
     return str(Path(sys.executable).resolve())
 
 
+def _relaunch_app() -> None:
+    """Quit and reopen GlucoBar, restarting both the frontend and daemon.
+
+    A detached shell waits for this process to exit (the supervisor's
+    ``atexit`` hook stops the daemon first, freeing :8765 and the
+    single-instance lock), then reopens the bundle. ``start_new_session``
+    keeps the waiter out of our process group so shutdown doesn't kill it.
+    """
+    subprocess.Popen(
+        [
+            "/bin/sh",
+            "-c",
+            'while kill -0 "$1" 2>/dev/null; do sleep 0.2; done; exec /usr/bin/open "$2"',
+            "glucobar-relaunch",
+            str(os.getpid()),
+            _bundle_path(),
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    rumps.quit_application()
+
+
 def _credentials_dialog_prefill() -> tuple[str, str]:
     """Email + password currently in the Keychain, or empty strings if none."""
     loaded = load_credentials()
@@ -1043,6 +1068,7 @@ class GlucoseApp(rumps.App):
             _FRONTEND_STARTUP_TITLE, callback=self._on_toggle_startup
         )
         self._about_item = rumps.MenuItem("About GlucoBar", callback=self._on_about)
+        self._reload_item = rumps.MenuItem("Reload GlucoBar", callback=self._on_reload)
 
         # The menubar title carries the full status story (number, trend
         # arrow, or an error glyph), so the dropdown holds no text row —
@@ -1066,6 +1092,7 @@ class GlucoseApp(rumps.App):
             self._creds_item,
             None,
             self._about_item,
+            self._reload_item,
         ]
         self._update_startup_item()
 
@@ -1576,6 +1603,10 @@ class GlucoseApp(rumps.App):
 
     def _on_about(self, _sender) -> None:
         _show_about_panel()
+
+    def _on_reload(self, _sender) -> None:
+        log.info("Reload clicked; relaunching GlucoBar")
+        _relaunch_app()
 
     def _on_refresh(self, _sender) -> None:
         if not _has_stored_credentials():
