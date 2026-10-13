@@ -7,7 +7,8 @@ Run with::
     .venv/bin/uvicorn daemon.main:app --host 127.0.0.1 --port 8765
 
 Always binds to ``127.0.0.1`` by default. This is a personal tool on a
-trusted machine, not a service.
+trusted machine, not a service; :class:`LocalOnlyGuard` additionally
+rejects requests originating from web pages in the user's browser.
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ from glucose_common.version import package_version  # noqa: E402
 
 from .backoff import ExponentialBackoff  # noqa: E402
 from .config import MissingCredentialsError, Settings, load_settings  # noqa: E402
+from .local_guard import LocalOnlyGuard  # noqa: E402
 from .logging_setup import configure_logging  # noqa: E402
 from .models import (  # noqa: E402
     CurrentResponse,
@@ -148,6 +150,9 @@ app = FastAPI(
     description="Personal LibreView polling daemon — local HTTP API.",
     lifespan=lifespan,
 )
+# No auth on this API, so refuse anything a web page could send (cross-site
+# requests, DNS rebinding); see ``daemon/local_guard.py``.
+app.add_middleware(LocalOnlyGuard, port=_settings.port, bind_host=_settings.host)
 
 
 # --- helpers ---

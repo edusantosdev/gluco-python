@@ -73,6 +73,9 @@ OPTIONS = {
         "keyring",
         "pylibrelinkup",
     ],
+    # Test-only (dev extra): reached via fastapi.testclient -> starlette.testclient,
+    # which the app never imports. The daemon client uses httpx.
+    "excludes": ["httpx2", "httpcore2", "truststore"],
     "plist": {
         "CFBundleName": "GlucoBar",
         "CFBundleDisplayName": "GlucoBar",

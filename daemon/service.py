@@ -25,6 +25,8 @@ Robustness features
   if that still fails.
 * Sensor warm-up detection from the ``Sensor`` metadata (``a`` +
   ``w``-minutes vs now).
+* A connect/read timeout on every LibreView call (see
+  :mod:`daemon.libreview_timeouts`); timeouts surface as ``NO_NETWORK``.
 """
 
 from __future__ import annotations
@@ -46,6 +48,7 @@ from pylibrelinkup import (
     TermsOfUseError,
 )
 
+from . import libreview_timeouts
 from .backoff import ExponentialBackoff
 from .session_store import FileSessionStore
 from .state import DaemonState, Status
@@ -134,6 +137,9 @@ class GlucoseService:
         self.poll_interval = poll_interval
         self.stale_after = stale_after_seconds
 
+        # The library sets no HTTP timeout; without this a hung LibreView
+        # server would block the poller (and its client lock) forever.
+        libreview_timeouts.install()
         self._new_client()
         self.patient = None
 

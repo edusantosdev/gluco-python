@@ -51,7 +51,9 @@ daemon/  (FastAPI HTTP server, 127.0.0.1:8765)
   ├── backoff.py          — ExponentialBackoff (separate instances for errors vs. rate limits)
   ├── session_store.py    — persists LibreView session token to disk
   ├── single_instance.py  — fcntl lock at ~/.glucobar/daemon.lock
-  └── parent_watch.py     — pipe-based parent-death detection (daemon exits if frontend dies)
+  ├── parent_watch.py     — pipe-based parent-death detection (daemon exits if frontend dies)
+  ├── libreview_timeouts.py — adds the HTTP timeout pylibrelinkup omits
+  └── local_guard.py      — rejects browser-originated requests (Host/Origin/Sec-Fetch-Site)
 
 glucose_common/  (shared by both processes)
   ├── credentials.py      — macOS Keychain read/write (service="glucobar")
@@ -68,6 +70,8 @@ glucose_common/  (shared by both processes)
 4. Parent-death pipe ensures the daemon exits cleanly even on frontend force-quit.
 
 ### Daemon HTTP API (localhost only, no auth)
+
+Requests must use a loopback `Host` and carry no foreign `Origin` / cross-site `Sec-Fetch-Site` (see `daemon/local_guard.py`); tests using `TestClient` need `base_url="http://127.0.0.1:8765"`.
 
 | Endpoint | Purpose |
 |---|---|

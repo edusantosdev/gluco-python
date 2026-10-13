@@ -31,27 +31,39 @@ dependencies = [
     # LibreView client library used by the daemon and the phase-0 probe.
     # (Package is named ``pylibrelinkup`` for historical reasons; it talks
     # to the LibreView backend the web dashboard uses.)
-    "pylibrelinkup>=0.10.0,<0.12",
+    "pylibrelinkup>=0.11.1,<0.12",
     # Menubar UI; pulls in pyobjc-framework-Cocoa, which gives us
     # ``AppKit`` and ``Foundation`` for the native dialogs in the frontend.
     "rumps>=0.4.0",
     # ``.env`` loader used by the daemon, the frontend, and the probe.
-    "python-dotenv>=1.0.0",
+    "python-dotenv>=1.2.4",
     # Keychain bridge for credentials.
-    "keyring>=24.0",
+    "keyring>=25.7",
     # Daemon HTTP API.
-    "fastapi>=0.110",
-    "pydantic>=2.0",
-    "uvicorn>=0.29",
+    "fastapi>=0.143",
+    "pydantic>=2.14",
+    "uvicorn>=0.54",
     # Typed settings for the daemon.
-    "pydantic-settings>=2.0",
+    "pydantic-settings>=2.15",
     # Synchronous HTTP client used by the frontend to talk to the daemon.
-    "httpx>=0.27",
+    "httpx>=0.28.1",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff>=0.4"]
-build = ["py2app>=0.28.8"]
+dev = [
+    "pytest>=9.1",
+    "ruff>=0.17",
+    # Starlette's TestClient now prefers httpx2; tests only. The app itself
+    # keeps using httpx for its daemon client.
+    "httpx2>=2.13.1",
+]
+build = [
+    "py2app>=0.28.10",
+    # py2app 0.28.10 calls distutils ``spawn(..., verbose=...)``, which the
+    # distutils bundled with setuptools 84 no longer accepts. Lift this cap
+    # once a py2app release stops passing ``verbose``.
+    "setuptools<84",
+]
 
 # Flat layout with three sibling top-level packages — setuptools' default
 # auto-discovery refuses to build that without an explicit list, so we
