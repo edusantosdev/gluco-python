@@ -1,9 +1,6 @@
-# Last published cask: v0.3.0. When you cut v1.0.0, bump version and replace
-# sha256 with the value from `release/GlucoBar-v1.0.0-macos.zip.sha256` (see
-# `RELEASING.md`) before users `brew install`.
 cask "gluco-bar" do
-  version "0.3.0"
-  sha256 "88674649c1b44cadd1e8a3f0486f1c0b32c0f659d51c6f367775793d0726257d"
+  version "1.0.0"
+  sha256 "197979037f9a631b6257184b674524d48b9e72d2eb0634d88fe7e58c6400c6f2"
 
   url "https://github.com/edusantosdev/glucobar-python/releases/download/v#{version}/GlucoBar-v#{version}-macos.zip"
   name "GlucoBar"
