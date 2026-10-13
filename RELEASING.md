@@ -49,22 +49,23 @@ uploads all three artifacts to the GitHub release for the tag.
 You can also trigger the workflow manually via
 `workflow_dispatch` (`inputs.version`).
 
-## 4. Update the Homebrew tap cask
+## 4. Update the Homebrew cask
 
-In your tap, edit `Casks/gluco-bar.rb`:
+The cask lives in this repo at `Casks/gluco-bar.rb` (the repo doubles as its
+own tap). Edit it:
 
 - `version "X.Y.Z"`
 - `sha256` from the release `.sha256` file
 - URL must resolve to:
-  `https://github.com/<owner>/<repo>/releases/download/vX.Y.Z/GlucoBar-vX.Y.Z-macos.zip`
+  `https://github.com/edusantosdev/glucobar-python/releases/download/vX.Y.Z/GlucoBar-vX.Y.Z-macos.zip`
 
-Commit and push in the tap repo.
+Commit and push to `main`.
 
 ## 5. Verify install
 
 ```bash
+brew tap edusantosdev/glucobar https://github.com/edusantosdev/glucobar-python
 brew update
-brew tap <your-org>/<your-tap>
 brew install --cask gluco-bar
 open -a GlucoBar
 ```

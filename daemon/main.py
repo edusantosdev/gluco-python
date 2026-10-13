@@ -232,7 +232,7 @@ async def current() -> CurrentResponse:
 
 
 @app.get("/glucose/graph", response_model=list[GraphPoint])
-async def graph(hours: int = Query(default=8, ge=1, le=24)) -> list[GraphPoint]:
+async def graph(hours: int = Query(default=12, ge=1, le=24)) -> list[GraphPoint]:
     """Return cached historical readings, oldest first.
 
     Reads from the in-memory snapshot the poll loop maintains — no extra

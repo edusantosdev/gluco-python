@@ -41,7 +41,7 @@ macos_frontend/  (rumps + AppKit UI)
   ├── app.py              — menubar UI, NSPanel modals, polling loop (30s)
   ├── daemon_supervisor.py — spawns/supervises daemon child process
   ├── api_client.py       — HTTP client hitting daemon endpoints
-  └── graph_view.py       — 8-hour glucose trend graph rendering
+  └── graph_view.py       — 12-hour glucose trend graph rendering
 
 daemon/  (FastAPI HTTP server, 127.0.0.1:8765)
   ├── main.py             — FastAPI route definitions

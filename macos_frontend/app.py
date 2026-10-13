@@ -83,10 +83,10 @@ from macos_frontend.graph_view import GlucoseGraphView, GraphThresholds  # noqa:
 from macos_frontend.menu_truncation import truncate_email_for_menu  # noqa: E402
 
 # Graph sits in the dropdown under the freshness text row.
-# 8 hours is the sweet spot between "see today's pattern" and "fits in a
-# menu item without dominating the screen". Width is wide enough to make
+# 12 hours matches the history LibreView returns (and the daemon retains),
+# so the graph shows everything available. Width is wide enough to make
 # minute-resolution shape visible but not so wide that the menu overflows.
-_GRAPH_HOURS = 8
+_GRAPH_HOURS = 12
 _GRAPH_WIDTH = 320
 _GRAPH_HEIGHT = 110
 # Optional horizontal offset from the status button's leading edge (points); see

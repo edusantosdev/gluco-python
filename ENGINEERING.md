@@ -55,7 +55,7 @@ Intentionally thin:
 - polls the daemon every 30s
 - renders the menubar title: value + trend arrow, or a status glyph
   (`Connecting…`, `⚠ Offline`, `⚠ Sign In`, `⚠ Error`)
-- renders a compact 8h graph in the dropdown
+- renders a compact 12h graph in the dropdown
 - provides `Refresh`, `Open at Login`, `Sign In/Out of LibreView
   Account`, `Quit`
 

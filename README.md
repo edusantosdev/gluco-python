@@ -4,7 +4,7 @@ GlucoBar puts your latest glucose reading and trend in the macOS menu bar, so
 you can stay on top of your diabetes **without breaking your focus**.
 
 <p align="center">
-  <img src="assets/screenshot.png" width="500" alt="GlucoBar in the macOS menu bar showing 76 with a steady arrow, and its menu open with an 8-hour glucose graph">
+  <img src="assets/screenshot.png" width="500" alt="GlucoBar in the macOS menu bar showing 76 with a steady arrow, and its menu open with the glucose graph">
 </p>
 
 Checking your phone pulls you out of whatever you're doing: unlock, open the
@@ -75,8 +75,8 @@ patient shared with it in LibreLinkUp (someone invited you, or you invited
 yourself). An account with nothing shared shows `⚠ Sign In`.
 - **One patient only.** If several people share with the account, GlucoBar
 shows the first one LibreView returns. There's no picker yet.
-- **Short history.** The graph covers the last 8 hours. LibreView returns
-about 12 hours of data through this API, so there are no long-term reports.
+- **Short history.** The graph covers the last 12 hours, which is all the
+history LibreView returns through this API. There are no long-term reports.
 - **macOS only**, and release builds aren't notarized (see
 [First launch](#first-launch-apple-could-not-verify-warning)).
 - **Not a medical device** (see below).
@@ -118,6 +118,16 @@ phone app must stay running, with Bluetooth and internet on (see
 - LibreView account credentials
 
 
+
+## Install with Homebrew
+
+```bash
+brew tap edusantosdev/glucobar https://github.com/edusantosdev/glucobar-python
+brew install --cask gluco-bar
+```
+
+Upgrade later with `brew upgrade --cask gluco-bar`. The first-launch
+warning below still applies to Homebrew installs.
 
 ## Install from a GitHub release
 
