@@ -68,14 +68,30 @@ OPTIONS = {
         "httpx",
         "fastapi",
         "uvicorn",
+        # anyio imports its event-loop backends dynamically
+        # (``anyio._backends._asyncio``), which py2app can't see; without it
+        # Starlette's threadpool (e.g. ``POST /auth/refresh``) fails.
+        "anyio",
         "pydantic_settings",
         "dotenv",
         "keyring",
         "pylibrelinkup",
     ],
-    # Test-only (dev extra): reached via fastapi.testclient -> starlette.testclient,
-    # which the app never imports. The daemon client uses httpx.
-    "excludes": ["httpx2", "httpcore2", "truststore"],
+    # Test-only (dev extra), never imported by the app:
+    # * httpx2 & deps — via fastapi.testclient -> starlette.testclient
+    #   (the daemon client uses httpx).
+    # * pytest & deps — via anyio's lazy ``from _pytest.outcomes import ...``,
+    #   which only runs under pytest.
+    "excludes": [
+        "httpx2",
+        "httpcore2",
+        "truststore",
+        "pytest",
+        "_pytest",
+        "pluggy",
+        "iniconfig",
+        "pygments",
+    ],
     "plist": {
         "CFBundleName": "GlucoBar",
         "CFBundleDisplayName": "GlucoBar",
