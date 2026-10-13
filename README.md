@@ -1,4 +1,8 @@
-# GlucoBar
+<p align="center">
+  <img src="assets/icon.png" width="128" alt="GlucoBar app icon: a white droplet on a black rounded square">
+</p>
+
+<h1 align="center">GlucoBar</h1>
 
 GlucoBar puts your latest glucose reading and trend in the macOS menu bar, so
 you can stay on top of your diabetes **without breaking your focus**.
