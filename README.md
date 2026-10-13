@@ -1,9 +1,18 @@
 # GlucoBar
 
-GlucoBar keeps your latest LibreView glucose reading and trend in the macOS
-menu bar so you can see whether you are in range, rising, or dropping while
-you work. It is not a phone replacement for LibreView; it is a convenience
-viewer tied to the same account data.
+GlucoBar puts your latest glucose reading and trend in the macOS menu bar, so
+you can stay on top of your diabetes **without breaking your focus**.
+
+Checking your phone pulls you out of whatever you're doing: unlock, open the
+app, wait, and then the notifications get you. When you're deep in work, in
+the zone, or just distracted, it's easy to put that check off and not notice
+a high or a low until it's already affecting you. GlucoBar keeps the number
+in the corner of your screen. A quick glance at `124 ↗` tells you whether
+you're in range, rising, or dropping, and you're back to work in a second.
+
+It doesn't replace the official Libre app. It's a convenience viewer for the
+same LibreView data, and you still need the phone app for alarms and for
+uploading readings.
 
 - `daemon/` polls LibreView and serves local HTTP on `127.0.0.1:8765`.
 - `macos_frontend/` is a menubar UI (`rumps` + AppKit) that reads from the daemon.
