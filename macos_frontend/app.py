@@ -1028,7 +1028,14 @@ class _StatusItemMenuPresenter(NSObject):
             # narrower than the status item.
             x = min(x, bw - menu_w)
         loc = NSPoint(x, NSMinY(button.bounds()))
-        ns_menu.popUpMenuPositioningItem_atLocation_inView_(None, loc, button)
+        # AppKit only draws the selected pill when the status item owns the
+        # menu (``setMenu:``). We pop up manually, so highlight the button
+        # ourselves; the popup call blocks until the menu closes.
+        button.highlight_(True)
+        try:
+            ns_menu.popUpMenuPositioningItem_atLocation_inView_(None, loc, button)
+        finally:
+            button.highlight_(False)
 
 
 class GlucoseApp(rumps.App):
