@@ -140,6 +140,22 @@ says `Unknown command: trust`, it's older and you can skip that line.
 Upgrade later with `brew upgrade --cask gluco`. The first-launch
 warning below still applies to Homebrew installs.
 
+### Upgrading from GlucoBar
+
+Gluco used to be called GlucoBar, and its cask was `gluco-bar`. Homebrew
+trusts casks by name, so trust the new name once before updating:
+
+```bash
+brew trust --cask edusantosdev/glucobar/gluco
+brew update
+brew upgrade --cask gluco
+```
+
+Until you do, `brew update` reports that it refuses to load `gluco` from an
+untrusted tap, and Gluco stops upgrading. Your sign-in and settings carry
+over, and if Open at Login was on, Gluco moves it to the new app the first
+time it opens.
+
 ## Install from a GitHub release
 
 1. Download `Gluco-vX.Y.Z-macos.zip` from the

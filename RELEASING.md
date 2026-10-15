@@ -61,6 +61,10 @@ own tap). Edit it:
 
 Commit and push to `main`.
 
+`cask_renames.json` maps the old `gluco-bar` token to `gluco` so existing
+installs migrate on `brew update`. Keep it; removing it strands anyone
+still on the old token.
+
 ## 5. Verify install
 
 ```bash
