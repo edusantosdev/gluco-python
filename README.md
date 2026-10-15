@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icon.png" width="128" alt="Gluco app icon: a white droplet on a black rounded square">
+  <img src="assets/icon.png" width="128" alt="Gluco app icon: a glossy red droplet on a pink-to-blue gradient">
 </p>
 
 <h1 align="center">Gluco</h1>
@@ -105,7 +105,7 @@ FreeStyle Libre, LibreLink, LibreView) are property of Abbott Laboratories.
 - **License:** [Apache-2.0](LICENSE) — see `LICENSE` for the full text.
 - **NOTICE:** Project and third-party attribution summary (`NOTICE`).
 - **Open source and assets:** [ATTRIBUTIONS.md](ATTRIBUTIONS.md) — runtime
-dependencies, build tools, the droplet icon source, and how to verify
+dependencies, build tools, the app icon, and how to verify
 transitive licenses.
 - **Copyright:** A copyright line in `NOTICE` and in the app bundle
 (`NSHumanReadableCopyright`) is the usual way to record authorship under

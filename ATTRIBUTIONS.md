@@ -4,11 +4,11 @@ Gluco is distributed under the **Apache License 2.0**. See `LICENSE` and `NOTICE
 
 ## App icon (graphic asset)
 
-The droplet shape used for `Gluco.icns` and the Icon Composer icon `Gluco.icon` is from **`scripts/app_bundle/drop-svgrepo-com.svg`**, the [“Drop” icon on SVG Repo](https://www.svgrepo.com/svg/478761/drop) (SVG Repo #478761). SVG Repo lists this asset under its [Public Domain (PD) license](https://www.svgrepo.com/page/licensing/#PD), so it can be used, modified, and redistributed without attribution; it is credited here as a courtesy.
+The icon artwork is **`scripts/app_bundle/Gluco.icon/Assets/artwork.png`**, a 1024×1024 image of a glossy droplet on a gradient.
 
-`scripts/build_gluco_icns.py` rasterizes that path with AppKit and runs Apple’s `iconutil` to produce the `.icns` file.
+`scripts/compile_app_icon.sh` compiles the Icon Composer icon `Gluco.icon`, which uses that image as its only layer, with Apple’s `actool` into the bundle’s `Assets.car` (the icon on macOS 26+).
 
-`scripts/app_bundle/Gluco.icon/Assets/drop.svg` is the same path, filled white and placed on a 1024×1024 canvas. `scripts/compile_app_icon.sh` compiles the `.icon` with Apple’s `actool` into the bundle’s `Assets.car` (the Liquid Glass icon on macOS 26+).
+`scripts/build_gluco_icns.py` clips the same image to the standard macOS rounded-square icon shape with AppKit and runs Apple’s `iconutil` to produce the `Gluco.icns` fallback for older macOS.
 
 ## macOS & Apple frameworks
 

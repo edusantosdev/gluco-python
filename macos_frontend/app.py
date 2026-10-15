@@ -131,7 +131,6 @@ _REPO_URL = "https://github.com/edusantosdev/gluco-python"
 # Keep in sync with ``pyproject.toml`` dependencies, Apple frameworks, and the icon.
 _ABOUT_OSS_LINKS: tuple[tuple[str, str], ...] = (
     ("Apache License 2.0 (Gluco)", "https://www.apache.org/licenses/LICENSE-2.0"),
-    ("App icon droplet (SVG Repo, public domain)", "https://www.svgrepo.com/svg/478761/drop"),
     ("FastAPI", "https://fastapi.tiangolo.com/"),
     ("httpx", "https://www.python-httpx.org/"),
     ("keyring", "https://github.com/jaraco/keyring"),

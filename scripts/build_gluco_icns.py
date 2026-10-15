@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Render Gluco.app icon assets (black tile + white droplet) and build ``Gluco.icns``.
+"""Render Gluco.app icon sizes from the artwork and build ``Gluco.icns``.
+
+The artwork (``scripts/app_bundle/Gluco.icon/Assets/artwork.png``) is the
+same image the Icon Composer icon uses, so the ``.icns`` fallback for macOS
+before 26 matches the Liquid Glass icon. Each size clips it to the standard
+macOS icon body: an 824 pt rounded square centred on a 1024 pt canvas.
 
 Requires macOS (uses AppKit drawing + ``iconutil``). Run from the repo root::
 
@@ -10,21 +15,20 @@ Output: ``scripts/app_bundle/Gluco.icns``
 
 from __future__ import annotations
 
-import re
 import shutil
 import subprocess
 import sys
 import tempfile
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _OUT_ICNS = _REPO_ROOT / "scripts" / "app_bundle" / "Gluco.icns"
-_DROP_SVG = _REPO_ROOT / "scripts" / "app_bundle" / "drop-svgrepo-com.svg"
-_DROP_VIEWBOX_SIZE = 512.0
-_SVG_PATH_TOKEN = re.compile(
-    r"[AaCcHhLlMmQqSsTtVvZz]|[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?"
-)
+_ARTWORK = _REPO_ROOT / "scripts" / "app_bundle" / "Gluco.icon" / "Assets" / "artwork.png"
+
+# Apple's macOS icon grid, as fractions of the canvas: the body is 824 of
+# 1024 with a ~185 corner radius, leaving room for the system shadow.
+_BODY_FRACTION = 824.0 / 1024.0
+_CORNER_FRACTION = 185.4 / 824.0
 
 # macOS iconset sizes (points → pixel width/height).
 _ICONSET_ENTRIES: tuple[tuple[str, int], ...] = (
@@ -41,138 +45,37 @@ _ICONSET_ENTRIES: tuple[tuple[str, int], ...] = (
 )
 
 
-def _is_svg_command(token: str) -> bool:
-    return token.isalpha()
-
-
-def _load_drop_path_data() -> str:
-    root = ET.parse(_DROP_SVG).getroot()
-    for elem in root.iter():
-        if elem.tag.endswith("path") and elem.attrib.get("d"):
-            return elem.attrib["d"]
-    raise RuntimeError(f"No SVG path found in {_DROP_SVG}")
-
-
-def _svg_path_to_bezier(path_data: str):
-    """Convert the subset of SVG path commands used by the source droplet."""
-    from AppKit import NSBezierPath
-
-    tokens = _SVG_PATH_TOKEN.findall(path_data)
-    path = NSBezierPath.bezierPath()
-    index = 0
-    command: str | None = None
-    current = (0.0, 0.0)
-    start = (0.0, 0.0)
-
-    def has_number() -> bool:
-        return index < len(tokens) and not _is_svg_command(tokens[index])
-
-    def read_float() -> float:
-        nonlocal index
-        value = float(tokens[index])
-        index += 1
-        return value
-
-    while index < len(tokens):
-        if _is_svg_command(tokens[index]):
-            command = tokens[index]
-            index += 1
-
-        if command in {"M", "m"}:
-            first = True
-            while has_number():
-                x, y = read_float(), read_float()
-                if command == "m":
-                    x += current[0]
-                    y += current[1]
-                current = (x, y)
-                if first:
-                    path.moveToPoint_(current)
-                    start = current
-                    first = False
-                else:
-                    path.lineToPoint_(current)
-            command = "l" if command == "m" else "L"
-        elif command in {"L", "l"}:
-            while has_number():
-                x, y = read_float(), read_float()
-                if command == "l":
-                    x += current[0]
-                    y += current[1]
-                current = (x, y)
-                path.lineToPoint_(current)
-        elif command in {"H", "h"}:
-            while has_number():
-                x = read_float()
-                if command == "h":
-                    x += current[0]
-                current = (x, current[1])
-                path.lineToPoint_(current)
-        elif command in {"V", "v"}:
-            while has_number():
-                y = read_float()
-                if command == "v":
-                    y += current[1]
-                current = (current[0], y)
-                path.lineToPoint_(current)
-        elif command in {"C", "c"}:
-            while has_number():
-                c1 = (read_float(), read_float())
-                c2 = (read_float(), read_float())
-                end = (read_float(), read_float())
-                if command == "c":
-                    c1 = (c1[0] + current[0], c1[1] + current[1])
-                    c2 = (c2[0] + current[0], c2[1] + current[1])
-                    end = (end[0] + current[0], end[1] + current[1])
-                path.curveToPoint_controlPoint1_controlPoint2_(end, c1, c2)
-                current = end
-        elif command in {"Z", "z"}:
-            path.closePath()
-            current = start
-            command = None
-        else:
-            raise RuntimeError(f"Unsupported SVG path command: {command}")
-
-    return path
-
-
-def _draw_app_icon(pixels: int):
-    """Return an ``NSImage`` ``pixels``×``pixels`` with a black tile and sourced white droplet."""
+def _draw_app_icon(size: int):
     from AppKit import (
         NSBezierPath,
-        NSColor,
+        NSCompositingOperationSourceOver,
         NSGraphicsContext,
         NSImage,
+        NSImageInterpolationHigh,
+        NSMakeRect,
+        NSSize,
+        NSZeroRect,
     )
-    from Foundation import NSAffineTransform, NSMakeRect, NSSize
 
-    size = float(pixels)
+    artwork = NSImage.alloc().initWithContentsOfFile_(str(_ARTWORK))
+    if artwork is None:
+        raise RuntimeError(f"Could not load {_ARTWORK}")
+
+    body = size * _BODY_FRACTION
+    inset = (size - body) / 2.0
+    corner = body * _CORNER_FRACTION
+    body_rect = NSMakeRect(inset, inset, body, body)
+
     img = NSImage.alloc().initWithSize_(NSSize(size, size))
     img.lockFocus()
     try:
-        bg = NSColor.colorWithCalibratedWhite_alpha_(0.05, 1.0)
-        bg.setFill()
-        corner = size * 0.223
-        tile = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
-            NSMakeRect(0, 0, size, size), corner, corner
+        NSGraphicsContext.currentContext().setImageInterpolation_(NSImageInterpolationHigh)
+        NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
+            body_rect, corner, corner
+        ).addClip()
+        artwork.drawInRect_fromRect_operation_fraction_(
+            body_rect, NSZeroRect, NSCompositingOperationSourceOver, 1.0
         )
-        tile.fill()
-
-        pad = size * 0.14
-        icon_size = size - 2 * pad
-        scale = icon_size / _DROP_VIEWBOX_SIZE
-
-        NSGraphicsContext.saveGraphicsState()
-        try:
-            transform = NSAffineTransform.transform()
-            transform.translateXBy_yBy_(pad, pad + icon_size)
-            transform.scaleXBy_yBy_(scale, -scale)
-            transform.concat()
-
-            NSColor.whiteColor().setFill()
-            _svg_path_to_bezier(_load_drop_path_data()).fill()
-        finally:
-            NSGraphicsContext.restoreGraphicsState()
     finally:
         img.unlockFocus()
     return img
