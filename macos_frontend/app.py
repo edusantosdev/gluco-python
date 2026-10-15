@@ -27,11 +27,6 @@ from pathlib import Path
 import objc
 import rumps
 from AppKit import (
-    NSAboutPanelOptionApplicationIcon,
-    NSAboutPanelOptionApplicationName,
-    NSAboutPanelOptionApplicationVersion,
-    NSAboutPanelOptionCredits,
-    NSAboutPanelOptionVersion,
     NSApp,
     NSApplication,
     NSApplicationActivationPolicyAccessory,
@@ -42,10 +37,8 @@ from AppKit import (
     NSFont,
     NSFontAttributeName,
     NSForegroundColorAttributeName,
-    NSImage,
     NSLayoutConstraint,
     NSLineBreakByTruncatingTail,
-    NSLinkAttributeName,
     NSMakeRect,
     NSMutableAttributedString,
     NSMutableParagraphStyle,
@@ -55,10 +48,9 @@ from AppKit import (
     NSTextField,
     NSView,
     NSWindowStyleMaskTitled,
-    NSWorkspace,
 )
 from dotenv import load_dotenv
-from Foundation import NSURL, NSBundle, NSObject, NSSize
+from Foundation import NSBundle, NSObject
 from rumps import events as rumps_events
 
 # Keep repo root importable when launched from the app wrapper.
@@ -71,7 +63,7 @@ from glucose_common.credentials import (  # noqa: E402
     load_credentials,
     save_credentials,
 )
-from glucose_common.version import package_version  # noqa: E402
+from macos_frontend.about import show_about  # noqa: E402
 from macos_frontend.api_client import (  # noqa: E402
     CurrentReading,
     DaemonClient,
@@ -118,91 +110,6 @@ _THRESHOLD_LOW_MG_DL = 70.0
 _THRESHOLD_HIGH_MG_DL = 180.0
 _THRESHOLD_VERY_HIGH_MG_DL = 250.0
 
-_ABOUT_TAGLINE = (
-    "Gluco keeps your latest LibreView glucose reading and trend visible in the macOS "
-    "menu bar, so you can see whether you’re in range, rising, or falling while focused "
-    "on your Mac. It helps you notice high or low blood sugar values sooner without having "
-    "to pick up your phone to check."
-)
-_AUTHOR_NAME = "Eduardo Santos"
-_REPO_URL = "https://github.com/edusantosdev/gluco-python"
-
-# Third-party components and artwork — shown as a link list in the About panel.
-# Keep in sync with ``pyproject.toml`` dependencies, Apple frameworks, and the icon.
-_ABOUT_OSS_LINKS: tuple[tuple[str, str], ...] = (
-    ("Apache License 2.0 (Gluco)", "https://www.apache.org/licenses/LICENSE-2.0"),
-    ("FastAPI", "https://fastapi.tiangolo.com/"),
-    ("httpx", "https://www.python-httpx.org/"),
-    ("keyring", "https://github.com/jaraco/keyring"),
-    ("AppKit and Foundation", "https://developer.apple.com/documentation/appkit"),
-    ("pylibrelinkup (LibreView / LibreLinkUp API client)", "https://pypi.org/project/pylibrelinkup/"),
-    ("PyObjC (Python ↔ AppKit and Objective-C)", "https://github.com/ronaldoussoren/pyobjc"),
-    ("Pydantic", "https://docs.pydantic.dev/"),
-    ("pydantic-settings", "https://github.com/pydantic/pydantic-settings"),
-    ("python-dotenv", "https://github.com/theskumar/python-dotenv"),
-    ("Python (runtime)", "https://www.python.org/"),
-    ("rumps (menu bar apps)", "https://github.com/jaredks/rumps"),
-    ("Uvicorn", "https://www.uvicorn.org/"),
-)
-
-
-def _about_credits_text_and_link_ranges() -> tuple[str, list[tuple[int, int, str]]]:
-    """Build About credits and ``(start, end, url)`` ranges for tappable links."""
-    parts: list[str] = []
-    ranges: list[tuple[int, int, str]] = []
-
-    def _append_linked_line(label: str, url: str) -> None:
-        line = f"• {label}\n"
-        line_start = sum(len(p) for p in parts)
-        parts.append(line)
-        # Link the label only, after the bullet and space.
-        rstart = line_start + 2
-        rend = rstart + len(label)
-        ranges.append((rstart, rend, url))
-
-    parts.append(f"{_ABOUT_TAGLINE}\n\n")
-    parts.append(f"Created by\n{_AUTHOR_NAME}\n\n")
-    parts.append("Project page (source and issues)\n")
-    repo_start = sum(len(p) for p in parts)
-    parts.append(f"{_REPO_URL}\n\n")
-    ranges.append((repo_start, repo_start + len(_REPO_URL), _REPO_URL))
-
-    parts.append("License\n")
-    parts.append(
-        "Gluco is distributed under the Apache License, version 2.0. The software is "
-        "provided as-is, without warranties or guarantees of any kind.\n\n"
-    )
-    parts.append("Open source\n")
-    parts.append(
-        "The following projects, libraries, and systems are used to build and run Gluco. "
-        "Click a name to open its page in your browser.\n\n"
-    )
-    for label, url in _ABOUT_OSS_LINKS:
-        _append_linked_line(label, url)
-    parts.append(
-        "\nDisclaimer\n"
-        "Gluco is not a medical device and must not be used for diagnosis, treatment, "
-        "dosing, emergency decisions, or any other medical decision. Readings may be delayed, "
-        "missing, inaccurate, or unavailable. Always verify glucose information with your "
-        "official LibreView/LibreLink app, glucose meter, or qualified healthcare professional.\n\n"
-        "This is an independent open-source project. It is not affiliated with, endorsed by, "
-        "or supported by Abbott or LibreView. You use Gluco at your own risk."
-    )
-    text = "".join(parts)
-    return text, ranges
-
-
-def _attributed_string_with_http_links(plain: str, link_ranges: list[tuple[int, int, str]]):
-    """``NSMutableAttributedString`` with ``NSLinkAttributeName`` for each range."""
-    attr = NSMutableAttributedString.alloc().initWithString_(plain)
-    for rstart, rend, url in link_ranges:
-        attr.addAttribute_value_range_(
-            NSLinkAttributeName,
-            NSURL.URLWithString_(url),
-            (rstart, rend - rstart),
-        )
-    return attr
-
 # How long to wait after the AppKit runloop starts before popping the
 # first-run credentials modal. Short enough that a fresh user never
 # notices they saw the menubar first, long enough that the runloop
@@ -240,81 +147,6 @@ log = logging.getLogger("glucose.frontend")
 # wedged in its tracking session). We use
 # ``performSelectorOnMainThread:`` to marshal the actual UI call back
 # to the main thread.
-
-
-def _about_credits_attributed_string() -> NSMutableAttributedString:
-    """Credits for the About panel: project URL and each third-party link are tappable."""
-    text, link_ranges = _about_credits_text_and_link_ranges()
-    return _attributed_string_with_http_links(text, link_ranges)
-
-
-def _about_version_string() -> str:
-    """Version shown in the About box: prefer the bundle’s ``Info.plist``."""
-    bundle = NSBundle.mainBundle()
-    if bundle is not None:
-        info = bundle.infoDictionary()
-        if info is not None:
-            s = info.get("CFBundleShortVersionString")
-            if s:
-                return str(s)
-    return package_version()
-
-
-# ``NSWorkspace.iconForFile_`` often returns a 32pt logical size; the standard About
-# panel uses ``NSImage.size`` to size the header artwork, so it looks tiny unless we
-# scale up. Do not downscale an already large icon.
-_ABOUT_PANEL_ICON_MAX_EDGE_PT = 192.0
-
-
-def _enlarge_image_for_about_panel_if_needed(icon) -> None:
-    s = icon.size()
-    if s.width <= 0 or s.height <= 0:
-        return
-    m = max(s.width, s.height)
-    if m >= _ABOUT_PANEL_ICON_MAX_EDGE_PT:
-        return
-    k = _ABOUT_PANEL_ICON_MAX_EDGE_PT / m
-    icon.setSize_(NSSize(s.width * k, s.height * k))
-
-
-def _show_about_panel() -> None:
-    """Open the standard About window.
-
-    ``CFBundleIconFile`` and bundle metadata supply defaults, but
-    ``LSUIElement`` frontends can show a blank icon unless we pass an
-    explicit image. Version strings come from installed package metadata
-    (``pyproject.toml``) so the UI matches the declared release.
-    """
-    v = _about_version_string()
-    opts = {
-        NSAboutPanelOptionApplicationName: "Gluco",
-        NSAboutPanelOptionVersion: v,
-        NSAboutPanelOptionApplicationVersion: v,
-        NSAboutPanelOptionCredits: _about_credits_attributed_string(),
-    }
-    # Use the same icon Finder shows for this ``.app``: loading ``Gluco.icns`` directly
-    # can select a different representation or scaling than the workspace cache does for
-    # the bundle, so About and the main app icon can look different otherwise.
-    bundle = NSBundle.mainBundle()
-    if bundle is not None:
-        app_path = bundle.bundlePath()
-        if app_path:
-            icon = NSWorkspace.sharedWorkspace().iconForFile_(app_path)
-            if icon is not None:
-                _enlarge_image_for_about_panel_if_needed(icon)
-                opts[NSAboutPanelOptionApplicationIcon] = icon
-            else:
-                path = bundle.pathForResource_ofType_("Gluco", "icns")
-                if path:
-                    fallback = NSImage.alloc().initWithContentsOfFile_(path)
-                    if fallback is not None:
-                        _enlarge_image_for_about_panel_if_needed(fallback)
-                        opts[NSAboutPanelOptionApplicationIcon] = fallback
-    NSApp.orderFrontStandardAboutPanelWithOptions_(opts)
-    try:
-        NSApp.activateIgnoringOtherApps_(True)
-    except Exception:  # noqa: BLE001
-        pass
 
 
 def _run_in_background(fn) -> None:
@@ -1614,7 +1446,7 @@ class GlucoseApp(rumps.App):
         return True
 
     def _on_about(self, _sender) -> None:
-        _show_about_panel()
+        show_about()
 
     def _on_reload(self, _sender) -> None:
         log.info("Restart clicked; relaunching Gluco")
