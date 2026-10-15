@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gluco"
-version = "1.0.6"
+version = "1.0.7"
 description = "Gluco — macOS menubar glucose display backed by LibreView."
 readme = "README.md"
 license = "Apache-2.0"
