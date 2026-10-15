@@ -975,24 +975,24 @@ def _parse_sensor_timestamp(timestamp_iso: str | None) -> datetime | None:
         return None
 
 
-class _StatusItemMenuPresenter(NSObject):
-    """Refreshes time-sensitive rows, then opens the main ``NSMenu`` natively.
+class _StatusMenuDelegate(NSObject):
+    """Refreshes time-sensitive rows each time the main ``NSMenu`` opens.
 
-    The status item has no menu attached at rest, so a click lands here
-    first. We attach the menu only for the duration of a synthetic click:
-    a manual ``popUpMenuPositioningItem:atLocation:inView:`` can't show the
-    selected pill behind the status item (``highlight:`` isn't drawn on
-    current macOS), but a menu the status item opens itself is.
+    The menu stays attached to the status item (``setMenu:``, as rumps
+    does it) so AppKit opens it on mouse-down and draws the selected pill
+    for as long as it's open. Opening it ourselves from the button action
+    fires on mouse-up, after AppKit has already dropped the press
+    highlight, which made the pill flash off and back on.
     """
 
     def initWithGlucoseApp_(self, app: GlucoseApp):
-        self = objc.super(_StatusItemMenuPresenter, self).init()
+        self = objc.super(_StatusMenuDelegate, self).init()
         if self is None:
             return None
         self._glucose_app = app
         return self
 
-    def showGlucoseMenu_(self, sender):
+    def menuNeedsUpdate_(self, ns_menu):  # noqa: N802 - Obj-C selector name.
         app = self._glucose_app
         # If the daemon was unreachable on the last poll, retry once when the
         # user opens the menu so a slow-starting daemon is picked up without
@@ -1004,9 +1004,11 @@ class _StatusItemMenuPresenter(NSObject):
         # advance once per ``poll_interval`` and the row could read e.g.
         # "(Just now)" while disabled long after the reading went stale.
         app._update_refresh_item()
-        app._update_startup_item()
         app._update_credentials_item()
-        ns_menu = app._menu._menu
+        # The login-item check shells out to System Events (~250 ms), so it
+        # runs off the main thread and ticks the row once it answers rather
+        # than holding the menu closed.
+        _run_in_background(app._refresh_startup_item)
         ns_menu.sizeToFit()
         menu_w = float(ns_menu.size().width)
         # Stretch the graph row to the menu width so bands/line match separator
@@ -1015,15 +1017,6 @@ class _StatusItemMenuPresenter(NSObject):
         if abs(float(gv.frame().size.width) - menu_w) > 0.5:
             gv.setFrame_(NSMakeRect(0, 0, menu_w, _GRAPH_HEIGHT))
             ns_menu.sizeToFit()
-        # ``performClick:`` on a button whose status item owns a menu runs
-        # the menu's tracking loop synchronously, so detaching afterwards
-        # restores the click-to-action path for the next open.
-        status_item = app._nsapp.nsstatusitem
-        status_item.setMenu_(ns_menu)
-        try:
-            sender.performClick_(None)
-        finally:
-            status_item.setMenu_(None)
 
 
 class GlucoseApp(rumps.App):
@@ -1106,8 +1099,8 @@ class GlucoseApp(rumps.App):
         self._arrow_pulse_timer = rumps.Timer(
             self._on_arrow_pulse_tick, _PULSE_TICK_S
         )
-        self._status_menu_presenter = _StatusItemMenuPresenter.alloc().initWithGlucoseApp_(self)
-        rumps_events.before_start.register(self._install_status_menu_presenter)
+        self._status_menu_delegate = _StatusMenuDelegate.alloc().initWithGlucoseApp_(self)
+        rumps_events.before_start.register(self._install_status_menu_delegate)
         self._timer.start()
         self._on_tick(None)
 
@@ -1148,15 +1141,8 @@ class GlucoseApp(rumps.App):
             )
             self._first_run_timer.start()
 
-    def _install_status_menu_presenter(self, *_unused) -> None:
-        delegate = self._nsapp
-        item = delegate.nsstatusitem
-        item.setMenu_(None)
-        button = item.button()
-        if button is None:
-            return
-        button.setTarget_(self._status_menu_presenter)
-        button.setAction_("showGlucoseMenu:")
+    def _install_status_menu_delegate(self, *_unused) -> None:
+        self._menu._menu.setDelegate_(self._status_menu_delegate)
 
     # --- title rendering ---
 
@@ -1727,6 +1713,13 @@ class GlucoseApp(rumps.App):
     def _update_startup_item(self) -> None:
         enabled = _frontend_startup_enabled()
         self._startup_item._menuitem.setState_(1 if enabled else 0)
+
+    def _refresh_startup_item(self) -> None:
+        """Background-thread variant: query off-main, apply on main."""
+        enabled = _frontend_startup_enabled()
+        _run_on_main_and_wait(
+            lambda: self._startup_item._menuitem.setState_(1 if enabled else 0)
+        )
 
     def _on_toggle_startup(self, _sender) -> None:
         _run_in_background(self._toggle_startup_impl)
