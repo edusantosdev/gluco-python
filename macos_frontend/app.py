@@ -58,7 +58,7 @@ from AppKit import (
     NSWorkspace,
 )
 from dotenv import load_dotenv
-from Foundation import NSURL, NSBundle, NSMinY, NSObject, NSPoint, NSSize
+from Foundation import NSURL, NSBundle, NSObject, NSSize
 from rumps import events as rumps_events
 
 # Keep repo root importable when launched from the app wrapper.
@@ -89,9 +89,6 @@ from macos_frontend.menu_truncation import truncate_email_for_menu  # noqa: E402
 _GRAPH_HOURS = 12
 _GRAPH_WIDTH = 320
 _GRAPH_HEIGHT = 110
-# Optional horizontal offset from the status button's leading edge (points); see
-# ``_StatusItemMenuPresenter``.
-_MENU_POPUP_X_NUDGE_PT = 0.0
 
 # Title pulse animation. The value and arrow gently fade together on a
 # shared cosine curve whenever the reading's trend is directional
@@ -979,14 +976,13 @@ def _parse_sensor_timestamp(timestamp_iso: str | None) -> datetime | None:
 
 
 class _StatusItemMenuPresenter(NSObject):
-    """Pops up the main ``NSMenu`` with its leading edge on the pill's leading edge.
+    """Refreshes time-sensitive rows, then opens the main ``NSMenu`` natively.
 
-    rumps attaches the menu with ``NSStatusItem.setMenu:``, which anchors the
-    panel to the trailing edge of the pill and looks visually disconnected from
-    the number. We clear that menu, handle the button action, and call
-    ``popUpMenuPositioningItem:atLocation:inView:`` with the menu's **leading**
-    edge at the status button's **leading** edge (in button coordinates), plus
-    ``_MENU_POPUP_X_NUDGE_PT``.
+    The status item has no menu attached at rest, so a click lands here
+    first. We attach the menu only for the duration of a synthetic click:
+    a manual ``popUpMenuPositioningItem:atLocation:inView:`` can't show the
+    selected pill behind the status item (``highlight:`` isn't drawn on
+    current macOS), but a menu the status item opens itself is.
     """
 
     def initWithGlucoseApp_(self, app: GlucoseApp):
@@ -1011,7 +1007,6 @@ class _StatusItemMenuPresenter(NSObject):
         app._update_startup_item()
         app._update_credentials_item()
         ns_menu = app._menu._menu
-        button = sender
         ns_menu.sizeToFit()
         menu_w = float(ns_menu.size().width)
         # Stretch the graph row to the menu width so bands/line match separator
@@ -1020,22 +1015,15 @@ class _StatusItemMenuPresenter(NSObject):
         if abs(float(gv.frame().size.width) - menu_w) > 0.5:
             gv.setFrame_(NSMakeRect(0, 0, menu_w, _GRAPH_HEIGHT))
             ns_menu.sizeToFit()
-            menu_w = float(ns_menu.size().width)
-        x = _MENU_POPUP_X_NUDGE_PT
-        bw = float(button.bounds().size.width)
-        if menu_w <= bw:
-            # Cap the right edge so the menu stays inside the pill when it is
-            # narrower than the status item.
-            x = min(x, bw - menu_w)
-        loc = NSPoint(x, NSMinY(button.bounds()))
-        # AppKit only draws the selected pill when the status item owns the
-        # menu (``setMenu:``). We pop up manually, so highlight the button
-        # ourselves; the popup call blocks until the menu closes.
-        button.highlight_(True)
+        # ``performClick:`` on a button whose status item owns a menu runs
+        # the menu's tracking loop synchronously, so detaching afterwards
+        # restores the click-to-action path for the next open.
+        status_item = app._nsapp.nsstatusitem
+        status_item.setMenu_(ns_menu)
         try:
-            ns_menu.popUpMenuPositioningItem_atLocation_inView_(None, loc, button)
+            sender.performClick_(None)
         finally:
-            button.highlight_(False)
+            status_item.setMenu_(None)
 
 
 class GlucoseApp(rumps.App):
@@ -1119,7 +1107,7 @@ class GlucoseApp(rumps.App):
             self._on_arrow_pulse_tick, _PULSE_TICK_S
         )
         self._status_menu_presenter = _StatusItemMenuPresenter.alloc().initWithGlucoseApp_(self)
-        rumps_events.before_start.register(self._install_number_aligned_status_menu)
+        rumps_events.before_start.register(self._install_status_menu_presenter)
         self._timer.start()
         self._on_tick(None)
 
@@ -1160,7 +1148,7 @@ class GlucoseApp(rumps.App):
             )
             self._first_run_timer.start()
 
-    def _install_number_aligned_status_menu(self, *_unused) -> None:
+    def _install_status_menu_presenter(self, *_unused) -> None:
         delegate = self._nsapp
         item = delegate.nsstatusitem
         item.setMenu_(None)
