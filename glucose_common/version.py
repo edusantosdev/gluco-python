@@ -16,4 +16,4 @@ def package_version() -> str:
 
         return version("gluco-bar")
     except Exception:
-        return "1.0.4"
+        return "1.0.5"
