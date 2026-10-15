@@ -120,7 +120,7 @@ _THRESHOLD_VERY_HIGH_MG_DL = 250.0
 
 _ABOUT_TAGLINE = (
     "GlucoBar keeps your latest LibreView glucose reading and trend visible in the macOS "
-    "menu bar, so you can see whether you are in range, rising, or dropping while focused "
+    "menu bar, so you can see whether you’re in range, rising, or falling while focused "
     "on your Mac. It helps you notice high or low blood sugar values sooner without having "
     "to pick up your phone to check."
 )
@@ -135,14 +135,14 @@ _ABOUT_OSS_LINKS: tuple[tuple[str, str], ...] = (
     ("FastAPI", "https://fastapi.tiangolo.com/"),
     ("httpx", "https://www.python-httpx.org/"),
     ("keyring", "https://github.com/jaraco/keyring"),
-    ("macOS AppKit & Foundation", "https://developer.apple.com/documentation/appkit"),
+    ("AppKit and Foundation", "https://developer.apple.com/documentation/appkit"),
     ("pylibrelinkup (LibreView / LibreLinkUp API client)", "https://pypi.org/project/pylibrelinkup/"),
     ("PyObjC (Python ↔ AppKit and Objective-C)", "https://github.com/ronaldoussoren/pyobjc"),
     ("Pydantic", "https://docs.pydantic.dev/"),
     ("pydantic-settings", "https://github.com/pydantic/pydantic-settings"),
     ("python-dotenv", "https://github.com/theskumar/python-dotenv"),
     ("Python (runtime)", "https://www.python.org/"),
-    ("rumps (menubar app)", "https://github.com/jaredks/rumps"),
+    ("rumps (menu bar apps)", "https://github.com/jaredks/rumps"),
     ("Uvicorn", "https://www.uvicorn.org/"),
 )
 
@@ -163,7 +163,7 @@ def _about_credits_text_and_link_ranges() -> tuple[str, list[tuple[int, int, str
 
     parts.append(f"{_ABOUT_TAGLINE}\n\n")
     parts.append(f"Created by\n{_AUTHOR_NAME}\n\n")
-    parts.append("Project page (source & issues)\n")
+    parts.append("Project page (source and issues)\n")
     repo_start = sum(len(p) for p in parts)
     parts.append(f"{_REPO_URL}\n\n")
     ranges.append((repo_start, repo_start + len(_REPO_URL), _REPO_URL))
@@ -176,7 +176,7 @@ def _about_credits_text_and_link_ranges() -> tuple[str, list[tuple[int, int, str
     parts.append("Open source\n")
     parts.append(
         "The following projects, libraries, and systems are used to build and run GlucoBar. "
-        "Tap a name to open its page in your browser.\n\n"
+        "Click a name to open its page in your browser.\n\n"
     )
     for label, url in _ABOUT_OSS_LINKS:
         _append_linked_line(label, url)
@@ -211,11 +211,11 @@ def _attributed_string_with_http_links(plain: str, link_ranges: list[tuple[int, 
 _FIRST_RUN_PROMPT_DELAY_S = 0.3
 _STATE_DIR = Path(os.environ.get("DAEMON_STATE_DIR", str(Path.home() / ".glucobar"))).expanduser()
 _KEYCHAIN_NOTICE_SENTINEL = _STATE_DIR / ".keychain_notice_seen"
-_KEYCHAIN_NOTICE_TITLE = "About the macOS Keychain prompt"
+_KEYCHAIN_NOTICE_TITLE = "About the Keychain Prompt"
 _KEYCHAIN_NOTICE_MESSAGE = (
-    "GlucoBar stores your LibreView sign-in in your Mac Keychain. "
-    "macOS may show a system dialog asking if GlucoBar can access that item.\n\n"
-    "Recommended: click \"Always Allow\" so you are not asked on every launch."
+    "GlucoBar keeps your LibreView email and password in your keychain. "
+    "macOS may ask whether GlucoBar can use them.\n\n"
+    "Choose Always Allow so you aren’t asked every time GlucoBar opens."
 )
 
 logging.basicConfig(
@@ -441,7 +441,7 @@ def _run_on_main_and_wait(fn):
 
 # Menu row title shown before the gray username suffix.
 _SIGN_OUT_MENU_PRIMARY_TITLE = "Sign Out of LibreView Account"
-_SIGN_IN_MENU_PRIMARY_TITLE = "Sign In to LibreView Account"
+_SIGN_IN_MENU_PRIMARY_TITLE = "Sign In to LibreView Account…"
 # Total title length≈budget for ``primary ("email")``; lower avoids very wide menus
 # (Coarse surrogate for width; separators have extra macOS inset either way.)
 _CREDENTIALS_MENU_MAX_CHARS = 42
@@ -449,9 +449,9 @@ _CREDENTIALS_MENU_MAX_CHARS = 42
 # Plain title used when the credentials dialog is opened without custom copy.
 _LIBREVIEW_ACCOUNT_TITLE = "LibreView Account"
 _SIGN_IN_DIALOG_BODY = (
-    "Sign in with your LibreView account so GlucoBar can read your glucose "
-    "readings. Your email and password are stored securely in your Mac "
-    "Keychain and never sent anywhere else."
+    "Sign in with your LibreView account so GlucoBar can show your glucose "
+    "readings. Your email and password are stored in your keychain and sent "
+    "only to LibreView."
 )
 _SIGN_IN_DIALOG_BUTTON = "Sign In"
 
@@ -615,7 +615,7 @@ def _native_credentials_dialog(
     current_password: str = "",
     title: str = _LIBREVIEW_ACCOUNT_TITLE,
     body_text: str = (
-        "Your email and password are stored securely in your Mac Keychain."
+        "Your email and password are stored in your keychain and sent only to LibreView."
     ),
     save_button: str = "Save",
 ) -> tuple[bool, str, str]:
@@ -646,14 +646,14 @@ def _native_credentials_dialog(
     email_field = NSTextField.alloc().initWithFrame_(
         NSMakeRect(0, 0, field_width, row_height)
     )
-    email_field.setPlaceholderString_("email@example.com")
+    email_field.setPlaceholderString_("name@example.com")
     email_field.setStringValue_(current_email)
     email_field.setTranslatesAutoresizingMaskIntoConstraints_(False)
 
     password_field = _PasteFriendlySecureTextField.alloc().initWithFrame_(
         NSMakeRect(0, 0, field_width, row_height)
     )
-    password_field.setPlaceholderString_("password")
+    password_field.setPlaceholderString_("Password")
     if current_password:
         password_field.setStringValue_(current_password)
     password_field.setTranslatesAutoresizingMaskIntoConstraints_(False)
@@ -1026,7 +1026,7 @@ class GlucoseApp(rumps.App):
         poll_interval: int,
         thresholds: ColorThresholds,
     ):
-        super().__init__("···", quit_button="Quit")
+        super().__init__("···", quit_button="Quit GlucoBar")
         self.poll_interval = poll_interval
         self.thresholds = thresholds
 
@@ -1045,7 +1045,7 @@ class GlucoseApp(rumps.App):
             _FRONTEND_STARTUP_TITLE, callback=self._on_toggle_startup
         )
         self._about_item = rumps.MenuItem("About GlucoBar", callback=self._on_about)
-        self._reload_item = rumps.MenuItem("Reload GlucoBar", callback=self._on_reload)
+        self._reload_item = rumps.MenuItem("Restart GlucoBar", callback=self._on_reload)
 
         # The menubar title carries the full status story (number, trend
         # arrow, or an error glyph), so the dropdown holds no text row —
@@ -1526,7 +1526,7 @@ class GlucoseApp(rumps.App):
         """Render an explicit in-progress auth state in the menubar title."""
         # Keep account-row logic and headline in sync while auth is in flight.
         self._last_daemon_status = "starting"
-        self._apply_title_parts("Signing in...", "", "", color=None)
+        self._apply_title_parts("Signing In…", "", "", color=None)
         self._update_credentials_item()
 
     def _check_sign_in_status_after_restart(self) -> str | None:
@@ -1552,20 +1552,16 @@ class GlucoseApp(rumps.App):
         """Return True when sign-in can be treated as successful."""
         if status == "auth_failed":
             self._show_alert(
-                title="Sign-in failed",
-                message=(
-                    "LibreView rejected that email or password. "
-                    "Please check your credentials and try again."
-                ),
+                title="Couldn’t sign in to LibreView.",
+                message="Check your email and password, then try again.",
             )
             return False
         if status == "tos_required":
             self._show_alert(
-                title="Action needed in Libre app",
+                title="LibreView needs you to accept its updated terms.",
                 message=(
-                    "LibreView requires Terms/Privacy re-acceptance before "
-                    "GlucoBar can connect. Open the official Libre app on your "
-                    "phone, accept the prompts, then try again."
+                    "Open the Libre app on your phone, accept the updated "
+                    "terms, then try again."
                 ),
             )
             return False
@@ -1575,7 +1571,7 @@ class GlucoseApp(rumps.App):
         _show_about_panel()
 
     def _on_reload(self, _sender) -> None:
-        log.info("Reload clicked; relaunching GlucoBar")
+        log.info("Restart clicked; relaunching GlucoBar")
         _relaunch_app()
 
     def _on_refresh(self, _sender) -> None:
@@ -1601,10 +1597,10 @@ class GlucoseApp(rumps.App):
         clear_credentials()
         if load_credentials() is not None:
             self._show_alert(
-                title="Couldn't sign out",
+                title="Couldn’t sign out.",
                 message=(
-                    "GlucoBar couldn't remove your LibreView credentials from "
-                    "the macOS Keychain. Please unlock Keychain Access and try again."
+                    "GlucoBar couldn’t remove your email and password from your "
+                    "keychain. Unlock your keychain in Keychain Access, then try again."
                 ),
             )
             return
@@ -1667,22 +1663,19 @@ class GlucoseApp(rumps.App):
             default_password = password
             if not email or not password:
                 self._show_alert(
-                    title="Sign-in incomplete",
-                    message=(
-                        "GlucoBar needs both your email and your LibreView "
-                        "password. Please check both fields and try again."
-                    ),
+                    title="Enter your email and password.",
+                    message="GlucoBar needs both to sign in to LibreView.",
                 )
                 continue
             try:
                 save_credentials(email=email, password=password)
-            except Exception as e:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 log.exception("Could not save first-run credentials")
                 self._show_alert(
-                    title="Couldn't save sign-in",
+                    title="Couldn’t save your sign-in.",
                     message=(
-                        f"{e}\n\nGlucoBar couldn't write to your Mac Keychain. "
-                        "Please try again."
+                        "GlucoBar couldn’t save your email and password to your "
+                        "keychain. Try again."
                     ),
                 )
                 continue
@@ -1701,11 +1694,10 @@ class GlucoseApp(rumps.App):
             # doesn't lag behind the success modal copy.
             _run_on_main_and_wait(lambda: self._on_tick(None))
             self._show_alert(
-                title="You're signed in",
+                title="You’re signed in.",
                 message=(
-                    "GlucoBar is connecting to LibreView with your account now. "
-                    "Your first glucose reading should appear in the menubar "
-                    "shortly."
+                    "GlucoBar is connecting to LibreView now. Your first reading "
+                    "should appear in the menu bar shortly."
                 ),
             )
             return
@@ -1740,19 +1732,16 @@ end run
 """,
                     app_path,
                 )
-            except Exception as e:  # noqa: BLE001
-                self._show_alert(
-                    title="Couldn't update startup setting",
-                    message=f"{e}",
-                )
+            except Exception:  # noqa: BLE001
+                log.exception("osascript failed while turning off login item")
+                self._show_login_item_alert(enable=False)
                 return
             if proc.returncode != 0:
-                self._show_alert(
-                    title="Couldn't update startup setting",
-                    message=(
-                        proc.stderr or proc.stdout or "Disabling login item failed"
-                    ).strip(),
+                log.warning(
+                    "Could not turn off login item via System Events: %s",
+                    (proc.stderr or proc.stdout or "unknown error").strip(),
                 )
+                self._show_login_item_alert(enable=False)
                 return
             _run_on_main_and_wait(self._update_startup_item)
             return
@@ -1771,21 +1760,27 @@ end run
 """,
                 app_path,
             )
-        except Exception as e:  # noqa: BLE001
-            self._show_alert(
-                title="Couldn't update startup setting",
-                message=f"{e}",
-            )
+        except Exception:  # noqa: BLE001
+            log.exception("osascript failed while turning on login item")
+            self._show_login_item_alert(enable=True)
             return
         if proc.returncode != 0:
-            self._show_alert(
-                title="Couldn't update startup setting",
-                message=(
-                    proc.stderr or proc.stdout or "Enabling login item failed"
-                ).strip(),
+            log.warning(
+                "Could not turn on login item via System Events: %s",
+                (proc.stderr or proc.stdout or "unknown error").strip(),
             )
+            self._show_login_item_alert(enable=True)
             return
         _run_on_main_and_wait(self._update_startup_item)
+
+    def _show_login_item_alert(self, *, enable: bool) -> None:
+        self._show_alert(
+            title=f"Couldn’t turn {'on' if enable else 'off'} Open at Login.",
+            message=(
+                "You can choose which apps open at login in "
+                "System Settings > General."
+            ),
+        )
 
     def _edit_credentials_impl(self) -> None:
         """Capture email + password and save to Keychain.
@@ -1816,27 +1811,26 @@ end run
             pref_password = password
             if not email:
                 self._show_alert(
-                    title="Email missing",
-                    message="Enter the email for your LibreView account, then try again.",
+                    title="Enter your email.",
+                    message="GlucoBar needs your LibreView email to sign in.",
                 )
                 continue
             if not password:
                 self._show_alert(
-                    title="Password missing",
-                    message="Enter your LibreView password, then try again.",
+                    title="Enter your password.",
+                    message="GlucoBar needs your LibreView password to sign in.",
                 )
                 continue
 
             try:
                 save_credentials(email=email, password=password)
-            except Exception as e:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
+                log.exception("Could not save edited credentials")
                 self._show_alert(
-                    title="Couldn't save sign-in",
+                    title="Couldn’t save your sign-in.",
                     message=(
-                        f"{e}\n\n"
-                        "GlucoBar only reads LibreView credentials from the macOS "
-                        "Keychain, so they need to land there before the daemon "
-                        "can sign in."
+                        "GlucoBar couldn’t save your email and password to your "
+                        "keychain. Try again."
                     ),
                 )
                 continue
@@ -1854,11 +1848,8 @@ end run
             # Keep menu-bar state in sync with this success path.
             _run_on_main_and_wait(lambda: self._on_tick(None))
             self._show_alert(
-                title="Sign-in saved",
-                message=(
-                    "Saved to your Mac Keychain. "
-                    "GlucoBar is reconnecting with these details now."
-                ),
+                title="You’re signed in.",
+                message="GlucoBar is reconnecting to LibreView with your updated details.",
             )
             return
 

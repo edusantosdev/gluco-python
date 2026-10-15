@@ -231,9 +231,10 @@ Menu actions:
 
 - `Refresh` — force daemon re-auth + immediate UI update
 - `Open at Login` — toggle macOS login item registration for next login
-- `Sign In to / Sign Out of LibreView Account` — manage Keychain credentials
+- `Sign In to LibreView Account…` / `Sign Out of LibreView Account` — manage Keychain credentials
 - `About GlucoBar` — version, author, repository link, license, and disclaimer
-- `Quit`
+- `Restart GlucoBar` — quit and reopen the app and its daemon
+- `Quit GlucoBar`
 
 
 
