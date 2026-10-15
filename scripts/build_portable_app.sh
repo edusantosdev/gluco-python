@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Build a standalone Glucobar.app with py2app.
+# Build a standalone Gluco.app with py2app.
 #
 # Usage:
 #   scripts/build_portable_app.sh
 #
 # Output:
-#   dist/Glucobar.app
+#   dist/Gluco.app
 
 set -euo pipefail
 
@@ -29,16 +29,16 @@ fi
 echo "Installing build dependencies (py2app)..."
 "${PYTHON}" -m pip install -e "${REPO_ROOT}[build]" >/dev/null
 
-ICON_ICNS="${REPO_ROOT}/scripts/app_bundle/Glucobar.icns"
+ICON_ICNS="${REPO_ROOT}/scripts/app_bundle/Gluco.icns"
 if [ ! -f "${ICON_ICNS}" ]; then
     echo "Generating ${ICON_ICNS}..."
-    "${PYTHON}" "${REPO_ROOT}/scripts/build_glucobar_icns.py"
+    "${PYTHON}" "${REPO_ROOT}/scripts/build_gluco_icns.py"
 fi
 
 echo "Building standalone app (py2app)..."
 # Stage the bundle under ``build/`` so we never delete all of ``dist/``
 # (release zips and other artifacts often sit there). Only replace
-# ``dist/Glucobar.app``. Use ``/bin/rm`` so a user ``rm`` alias cannot
+# ``dist/Gluco.app``. Use ``/bin/rm`` so a user ``rm`` alias cannot
 # break cleanup.
 /bin/rm -rf "${REPO_ROOT}/build/py2app"
 STAGING_APP_OUT="${REPO_ROOT}/build/py2app_app_out"
@@ -93,14 +93,14 @@ OPTIONS = {
         "pygments",
     ],
     "plist": {
-        "CFBundleName": "Glucobar",
-        "CFBundleDisplayName": "Glucobar",
+        "CFBundleName": "Gluco",
+        "CFBundleDisplayName": "Gluco",
         "CFBundleIdentifier": "com.glucobar.frontend",
         "CFBundleVersion": "1.0.5",
         "CFBundleShortVersionString": "1.0.5",
         "LSUIElement": True,
         "NSHighResolutionCapable": True,
-        "CFBundleIconFile": "Glucobar",
+        "CFBundleIconFile": "Gluco",
         "NSHumanReadableCopyright": (
             "Copyright © 2026 Eduardo Santos. Apache-2.0. Provided as-is; not a medical device."
         ),
@@ -120,39 +120,39 @@ EOF
         --bdist-base "${REPO_ROOT}/build/py2app"
 )
 
-STAGED_BUNDLE="${STAGING_APP_OUT}/Glucobar.app"
+STAGED_BUNDLE="${STAGING_APP_OUT}/Gluco.app"
 if [ ! -d "${STAGED_BUNDLE}" ]; then
     echo "error: py2app did not produce ${STAGED_BUNDLE}" >&2
     exit 1
 fi
 mkdir -p "${REPO_ROOT}/dist"
-if [ -e "${REPO_ROOT}/dist/Glucobar.app" ]; then
-    chmod -R u+w "${REPO_ROOT}/dist/Glucobar.app" 2>/dev/null || true
-    /bin/rm -rf "${REPO_ROOT}/dist/Glucobar.app"
+if [ -e "${REPO_ROOT}/dist/Gluco.app" ]; then
+    chmod -R u+w "${REPO_ROOT}/dist/Gluco.app" 2>/dev/null || true
+    /bin/rm -rf "${REPO_ROOT}/dist/Gluco.app"
 fi
 mv "${STAGED_BUNDLE}" "${REPO_ROOT}/dist/"
 /bin/rm -rf "${STAGING_APP_OUT}"
 
-APP_BUNDLE="${REPO_ROOT}/dist/Glucobar.app"
+APP_BUNDLE="${REPO_ROOT}/dist/Gluco.app"
 MACOS_DIR="${APP_BUNDLE}/Contents/MacOS"
 
 # Rename the subprocess Python launcher inside the bundle so macOS
 # permission dialogs (Keychain, network, etc.) triggered by any
-# subprocess show a recognisable "GlucobarDaemon" identity instead of
+# subprocess show a recognisable "GlucoDaemon" identity instead of
 # the generic "python". py2app keeps the original ``python`` binary in
 # place; we add a sibling copy with a meaningful name so the supervisor
 # can launch the daemon under that identity.
-if [ -x "${MACOS_DIR}/python" ] && [ ! -e "${MACOS_DIR}/GlucobarDaemon" ]; then
-    cp -p "${MACOS_DIR}/python" "${MACOS_DIR}/GlucobarDaemon"
-    chmod 0755 "${MACOS_DIR}/GlucobarDaemon"
+if [ -x "${MACOS_DIR}/python" ] && [ ! -e "${MACOS_DIR}/GlucoDaemon" ]; then
+    cp -p "${MACOS_DIR}/python" "${MACOS_DIR}/GlucoDaemon"
+    chmod 0755 "${MACOS_DIR}/GlucoDaemon"
 fi
 
 # Liquid Glass icon for macOS 26+, compiled from the Icon Composer
-# ``Glucobar.icon``. ``CFBundleIconName`` points macOS at it inside
-# ``Assets.car``; ``Glucobar.icns`` stays as the fallback. Must run
+# ``Gluco.icon``. ``CFBundleIconName`` points macOS at it inside
+# ``Assets.car``; ``Gluco.icns`` stays as the fallback. Must run
 # before codesign, since it changes the bundle.
 if "${REPO_ROOT}/scripts/compile_app_icon.sh" "${APP_BUNDLE}/Contents/Resources"; then
-    plutil -replace CFBundleIconName -string Glucobar "${APP_BUNDLE}/Contents/Info.plist"
+    plutil -replace CFBundleIconName -string Gluco "${APP_BUNDLE}/Contents/Info.plist"
 fi
 
 # Ad-hoc codesign the bundle so macOS treats it as a stable identity.

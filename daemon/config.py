@@ -5,7 +5,7 @@ if present). Credentials come from
 :func:`glucose_common.credentials.load_credentials`, which prefers env
 vars (set by the menubar supervisor) over a direct Keychain read — this
 collapses the macOS Keychain authorisation prompt to a single
-appearance tied to the ``Glucobar`` binary, instead of the daemon
+appearance tied to the ``Gluco`` binary, instead of the daemon
 subprocess triggering a second dialog. If the Keychain has no entries
 and no env was injected, the daemon exits cleanly and waits for the
 menubar frontend to prompt the user and seed them.

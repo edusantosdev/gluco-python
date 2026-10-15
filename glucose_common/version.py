@@ -14,6 +14,6 @@ def package_version() -> str:
     try:
         from importlib.metadata import version
 
-        return version("gluco-bar")
+        return version("gluco")
     except Exception:
         return "1.0.5"

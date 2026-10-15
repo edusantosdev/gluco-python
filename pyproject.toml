@@ -3,9 +3,9 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "gluco-bar"
+name = "gluco"
 version = "1.0.5"
-description = "Glucobar — macOS menubar glucose display backed by LibreView."
+description = "Gluco — macOS menubar glucose display backed by LibreView."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]

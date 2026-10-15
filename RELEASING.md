@@ -1,4 +1,4 @@
-# Releasing Glucobar
+# Releasing Gluco
 
 Short release checklist for macOS artifacts and Homebrew cask updates.
 Release automation lives in `.github/workflows/release.yml`.
@@ -18,7 +18,7 @@ python3 -m venv .venv
 scripts/build_portable_app.sh
 ```
 
-Output: `dist/Glucobar.app`.
+Output: `dist/Gluco.app`.
 
 ## 2. Package a release artifact
 
@@ -28,8 +28,8 @@ scripts/package_release_artifact.sh --version vX.Y.Z --repo <owner>/<repo>
 
 Outputs under `release/`:
 
-- `Glucobar-vX.Y.Z-macos.zip`
-- `Glucobar-vX.Y.Z-macos.zip.sha256`
+- `Gluco-vX.Y.Z-macos.zip`
+- `Gluco-vX.Y.Z-macos.zip.sha256`
 - `homebrew-cask-snippet.rb`
 
 Without `--version`, the script reads the version from `pyproject.toml`.
@@ -51,30 +51,30 @@ You can also trigger the workflow manually via
 
 ## 4. Update the Homebrew cask
 
-The cask lives in this repo at `Casks/gluco-bar.rb` (the repo doubles as its
+The cask lives in this repo at `Casks/gluco.rb` (the repo doubles as its
 own tap). Edit it:
 
 - `version "X.Y.Z"`
 - `sha256` from the release `.sha256` file
 - URL must resolve to:
-  `https://github.com/edusantosdev/glucobar-python/releases/download/vX.Y.Z/Glucobar-vX.Y.Z-macos.zip`
+  `https://github.com/edusantosdev/gluco-python/releases/download/vX.Y.Z/Gluco-vX.Y.Z-macos.zip`
 
 Commit and push to `main`.
 
 ## 5. Verify install
 
 ```bash
-brew tap edusantosdev/glucobar https://github.com/edusantosdev/glucobar-python
-brew trust --cask edusantosdev/glucobar/gluco-bar
+brew tap edusantosdev/gluco https://github.com/edusantosdev/gluco-python
+brew trust --cask edusantosdev/gluco/gluco
 brew update
-brew install --cask edusantosdev/glucobar/gluco-bar
-open -a Glucobar
+brew install --cask edusantosdev/gluco/gluco
+open -a Gluco
 ```
 
-Optionally `brew upgrade --cask gluco-bar` from the previous version.
+Optionally `brew upgrade --cask gluco` from the previous version.
 
 ## Notes
 
 - Artifacts are currently unsigned and not notarized.
 - For a manual fallback (no tag workflow), use
-  `gh release create vX.Y.Z release/Glucobar-vX.Y.Z-macos.zip`.
+  `gh release create vX.Y.Z release/Gluco-vX.Y.Z-macos.zip`.

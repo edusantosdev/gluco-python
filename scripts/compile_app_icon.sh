@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Compile the Icon Composer icon (``scripts/app_bundle/Glucobar.icon``)
+# Compile the Icon Composer icon (``scripts/app_bundle/Gluco.icon``)
 # into an ``Assets.car`` for the .app's ``Contents/Resources``.
 #
 # Usage:
@@ -7,7 +7,7 @@
 #
 # Writes ``<output-dir>/Assets.car``, which carries the Liquid Glass icon
 # (default / dark / clear / tinted) that macOS 26+ looks up via
-# ``CFBundleIconName``. ``Glucobar.icns`` (``CFBundleIconFile``) stays the
+# ``CFBundleIconName``. ``Gluco.icns`` (``CFBundleIconFile``) stays the
 # fallback for older macOS.
 #
 # Needs ``actool`` from a full Xcode 26+ (Command Line Tools alone don't
@@ -17,7 +17,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ICON_SRC="${REPO_ROOT}/scripts/app_bundle/Glucobar.icon"
+ICON_SRC="${REPO_ROOT}/scripts/app_bundle/Gluco.icon"
 
 if [ $# -ne 1 ]; then
     echo "usage: $0 <output-dir>" >&2
@@ -42,13 +42,13 @@ trap '/bin/rm -rf "${TMP_OUT}"' EXIT
 
 # ``--minimum-deployment-target`` below 26 makes actool also emit
 # pre-Liquid-Glass renditions inside ``Assets.car``. actool writes a
-# ``Glucobar.icns`` too; we keep the repo's own ``.icns`` instead.
+# ``Gluco.icns`` too; we keep the repo's own ``.icns`` instead.
 if ! xcrun actool "${ICON_SRC}" \
     --compile "${TMP_OUT}" \
     --platform macosx \
     --target-device mac \
     --minimum-deployment-target 11.0 \
-    --app-icon Glucobar \
+    --app-icon Gluco \
     --output-partial-info-plist "${TMP_OUT}/partial.plist" \
     --output-format human-readable-text \
     --errors --warnings; then

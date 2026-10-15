@@ -2,7 +2,7 @@
 
 Why this module exists
 ----------------------
-Glucobar ships as a single ``.app``. The menubar is the user-facing
+Gluco ships as a single ``.app``. The menubar is the user-facing
 entry point; the daemon is a background poll loop. Shipping them as
 one launchd job (the frontend) with the daemon as a supervised child
 means:
@@ -94,17 +94,17 @@ ProbeFn = Callable[[str, float], bool]
 def _default_daemon_executable() -> str:
     """Return the best path to run ``-m daemon`` as.
 
-    Inside the bundled ``Glucobar.app`` the build step (see
-    ``scripts/build_portable_app.sh``) places a ``GlucobarDaemon``
+    Inside the bundled ``Gluco.app`` the build step (see
+    ``scripts/build_portable_app.sh``) places a ``GlucoDaemon``
     copy of the Python launcher next to py2app's generic ``python``.
     Using the renamed binary means any macOS permission dialog
     triggered by the daemon subprocess identifies as
-    ``GlucobarDaemon`` instead of a bare ``python``, which is
+    ``GlucoDaemon`` instead of a bare ``python``, which is
     noticeably clearer for end users. Outside the bundle
     (source checkouts, dev runs), fall back to ``sys.executable``.
     """
     exe = Path(sys.executable)
-    candidate = exe.with_name("GlucobarDaemon")
+    candidate = exe.with_name("GlucoDaemon")
     if candidate.exists() and os.access(candidate, os.X_OK):
         return str(candidate)
     return sys.executable
@@ -256,7 +256,7 @@ class DaemonSupervisor:
         The frontend reads credentials from Keychain once and calls this
         before ``start()`` (and again on Sign In) so the daemon child
         never needs to re-read Keychain — collapsing the macOS auth
-        prompt to a single appearance tied to the main ``Glucobar``
+        prompt to a single appearance tied to the main ``Gluco``
         executable.
         """
         from glucose_common.credentials import ENV_EMAIL, ENV_PASSWORD
@@ -447,7 +447,7 @@ class DaemonSupervisor:
     def _start_watchdog(self) -> None:
         t = threading.Thread(
             target=self._watchdog_loop,
-            name="Glucobar-daemon-watchdog",
+            name="Gluco-daemon-watchdog",
             daemon=True,
         )
         self._watchdog = t
@@ -685,7 +685,7 @@ def get_active() -> DaemonSupervisor | None:
 def request_restart(base_url: str | None = None) -> None:
     """Ask the supervised daemon to restart.
 
-    In Glucobar's strict single-wrapper topology the daemon only
+    In Gluco's strict single-wrapper topology the daemon only
     ever runs as a managed child of the frontend supervisor, so the
     only supported restart path is:
 

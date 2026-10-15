@@ -20,7 +20,7 @@ python3.11 -m venv .venv
 
 # Build .app bundle
 scripts/build_portable_app.sh
-open dist/Glucobar.app
+open dist/Gluco.app
 
 # Run daemon only (dev)
 .venv/bin/python -m daemon   # listens on 127.0.0.1:8765
@@ -34,7 +34,7 @@ open dist/Glucobar.app
 
 ## Architecture
 
-Glucobar is a two-process macOS menubar app with a split across a localhost HTTP boundary:
+Gluco is a two-process macOS menubar app with a split across a localhost HTTP boundary:
 
 ```
 macos_frontend/  (rumps + AppKit UI)

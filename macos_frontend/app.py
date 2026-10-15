@@ -119,18 +119,18 @@ _THRESHOLD_HIGH_MG_DL = 180.0
 _THRESHOLD_VERY_HIGH_MG_DL = 250.0
 
 _ABOUT_TAGLINE = (
-    "Glucobar keeps your latest LibreView glucose reading and trend visible in the macOS "
+    "Gluco keeps your latest LibreView glucose reading and trend visible in the macOS "
     "menu bar, so you can see whether you’re in range, rising, or falling while focused "
     "on your Mac. It helps you notice high or low blood sugar values sooner without having "
     "to pick up your phone to check."
 )
 _AUTHOR_NAME = "Eduardo Santos"
-_REPO_URL = "https://github.com/edusantosdev/glucobar-python"
+_REPO_URL = "https://github.com/edusantosdev/gluco-python"
 
 # Third-party components and artwork — shown as a link list in the About panel.
 # Keep in sync with ``pyproject.toml`` dependencies, Apple frameworks, and the icon.
 _ABOUT_OSS_LINKS: tuple[tuple[str, str], ...] = (
-    ("Apache License 2.0 (Glucobar)", "https://www.apache.org/licenses/LICENSE-2.0"),
+    ("Apache License 2.0 (Gluco)", "https://www.apache.org/licenses/LICENSE-2.0"),
     ("App icon droplet (SVG Repo, public domain)", "https://www.svgrepo.com/svg/478761/drop"),
     ("FastAPI", "https://fastapi.tiangolo.com/"),
     ("httpx", "https://www.python-httpx.org/"),
@@ -170,24 +170,24 @@ def _about_credits_text_and_link_ranges() -> tuple[str, list[tuple[int, int, str
 
     parts.append("License\n")
     parts.append(
-        "Glucobar is distributed under the Apache License, version 2.0. The software is "
+        "Gluco is distributed under the Apache License, version 2.0. The software is "
         "provided as-is, without warranties or guarantees of any kind.\n\n"
     )
     parts.append("Open source\n")
     parts.append(
-        "The following projects, libraries, and systems are used to build and run Glucobar. "
+        "The following projects, libraries, and systems are used to build and run Gluco. "
         "Click a name to open its page in your browser.\n\n"
     )
     for label, url in _ABOUT_OSS_LINKS:
         _append_linked_line(label, url)
     parts.append(
         "\nDisclaimer\n"
-        "Glucobar is not a medical device and must not be used for diagnosis, treatment, "
+        "Gluco is not a medical device and must not be used for diagnosis, treatment, "
         "dosing, emergency decisions, or any other medical decision. Readings may be delayed, "
         "missing, inaccurate, or unavailable. Always verify glucose information with your "
         "official LibreView/LibreLink app, glucose meter, or qualified healthcare professional.\n\n"
         "This is an independent open-source project. It is not affiliated with, endorsed by, "
-        "or supported by Abbott or LibreView. You use Glucobar at your own risk."
+        "or supported by Abbott or LibreView. You use Gluco at your own risk."
     )
     text = "".join(parts)
     return text, ranges
@@ -213,9 +213,9 @@ _STATE_DIR = Path(os.environ.get("DAEMON_STATE_DIR", str(Path.home() / ".glucoba
 _KEYCHAIN_NOTICE_SENTINEL = _STATE_DIR / ".keychain_notice_seen"
 _KEYCHAIN_NOTICE_TITLE = "About the Keychain Prompt"
 _KEYCHAIN_NOTICE_MESSAGE = (
-    "Glucobar keeps your LibreView email and password in your keychain. "
-    "macOS may ask whether Glucobar can use them.\n\n"
-    "Choose Always Allow so you aren’t asked every time Glucobar opens."
+    "Gluco keeps your LibreView email and password in your keychain. "
+    "macOS may ask whether Gluco can use them.\n\n"
+    "Choose Always Allow so you aren’t asked every time Gluco opens."
 )
 
 logging.basicConfig(
@@ -226,7 +226,7 @@ log = logging.getLogger("glucose.frontend")
 
 # Dialog strategy: native ``NSPanel`` modals only.
 #
-# When launched from launchd via the ``Glucobar.app`` wrapper bundle
+# When launched from launchd via the ``Gluco.app`` wrapper bundle
 # (see ``scripts/app_bundle/``), AppKit sees a real
 # ``CFBundleIdentifier`` and ``LSUIElement`` and modal dialogs work
 # correctly — so we show a titled ``NSPanel`` with two fields for
@@ -288,12 +288,12 @@ def _show_about_panel() -> None:
     """
     v = _about_version_string()
     opts = {
-        NSAboutPanelOptionApplicationName: "Glucobar",
+        NSAboutPanelOptionApplicationName: "Gluco",
         NSAboutPanelOptionVersion: v,
         NSAboutPanelOptionApplicationVersion: v,
         NSAboutPanelOptionCredits: _about_credits_attributed_string(),
     }
-    # Use the same icon Finder shows for this ``.app``: loading ``Glucobar.icns`` directly
+    # Use the same icon Finder shows for this ``.app``: loading ``Gluco.icns`` directly
     # can select a different representation or scaling than the workspace cache does for
     # the bundle, so About and the main app icon can look different otherwise.
     bundle = NSBundle.mainBundle()
@@ -305,7 +305,7 @@ def _show_about_panel() -> None:
                 _enlarge_image_for_about_panel_if_needed(icon)
                 opts[NSAboutPanelOptionApplicationIcon] = icon
             else:
-                path = bundle.pathForResource_ofType_("Glucobar", "icns")
+                path = bundle.pathForResource_ofType_("Gluco", "icns")
                 if path:
                     fallback = NSImage.alloc().initWithContentsOfFile_(path)
                     if fallback is not None:
@@ -336,10 +336,10 @@ def _run_in_background(fn) -> None:
 
 # --- bundled-mode detection ------------------------------------------------
 #
-# Any launch outside ``Glucobar.app`` is unsupported and rejected at
+# Any launch outside ``Gluco.app`` is unsupported and rejected at
 # startup. We accept two "bundled enough" signals:
 #   1) main bundle id matches ``com.glucobar.frontend`` (py2app build)
-#   2) ``sys.executable`` path is inside ``Glucobar.app/Contents/MacOS``
+#   2) ``sys.executable`` path is inside ``Gluco.app/Contents/MacOS``
 #      (source-wrapper bundle used by install_launchagent.sh).
 
 _BUNDLE_ID = "com.glucobar.frontend"
@@ -354,15 +354,15 @@ def _is_bundled() -> bool:
         return True
     exe = Path(sys.executable)
     return (
-        exe.name == "Glucobar"
-        and "Glucobar.app" in exe.parts
+        exe.name == "Gluco"
+        and "Gluco.app" in exe.parts
         and "Contents" in exe.parts
         and "MacOS" in exe.parts
     )
 
 
 def _ensure_bundled_launch() -> None:
-    """Fail fast when launched outside ``Glucobar.app``.
+    """Fail fast when launched outside ``Gluco.app``.
 
     Native AppKit modal flows require being launched from the app wrapper
     (or a fully packaged bundle); running this module directly is
@@ -371,7 +371,7 @@ def _ensure_bundled_launch() -> None:
     if _is_bundled():
         return
     raise RuntimeError(
-        "Unsupported launch mode. Start Glucobar from Glucobar.app "
+        "Unsupported launch mode. Start Gluco from Gluco.app "
         "(e.g. run scripts/install_launchagent.sh install)."
     )
 
@@ -449,7 +449,7 @@ _CREDENTIALS_MENU_MAX_CHARS = 42
 # Plain title used when the credentials dialog is opened without custom copy.
 _LIBREVIEW_ACCOUNT_TITLE = "LibreView Account"
 _SIGN_IN_DIALOG_BODY = (
-    "Sign in with your LibreView account so Glucobar can show your glucose "
+    "Sign in with your LibreView account so Gluco can show your glucose "
     "readings. Your email and password are stored in your keychain and sent "
     "only to LibreView."
 )
@@ -470,7 +470,7 @@ def _bundle_path() -> str:
 
 
 def _relaunch_app() -> None:
-    """Quit and reopen Glucobar, restarting both the frontend and daemon.
+    """Quit and reopen Gluco, restarting both the frontend and daemon.
 
     A detached shell waits for this process to exit (the supervisor's
     ``atexit`` hook stops the daemon first, freeing :8765 and the
@@ -482,7 +482,7 @@ def _relaunch_app() -> None:
             "/bin/sh",
             "-c",
             'while kill -0 "$1" 2>/dev/null; do sleep 0.2; done; exec /usr/bin/open "$2"',
-            "glucobar-relaunch",
+            "gluco-relaunch",
             str(os.getpid()),
             _bundle_path(),
         ],
@@ -573,6 +573,52 @@ end run
         )
         return False
     return (proc.stdout or "").strip().lower() == "true"
+
+
+# Name the app shipped under before it became Gluco. AppleScript compares
+# text case-insensitively, so this also matches the interim "Glucobar".
+_LEGACY_LOGIN_ITEM_NAME = "GlucoBar"
+
+
+def _migrate_legacy_login_item() -> None:
+    """Re-point an "Open at Login" item left by the old app name at this bundle.
+
+    Upgrading from GlucoBar installs ``Gluco.app`` at a new path, so the old
+    login item opens nothing and the menu shows the option as off. Only
+    installed copies migrate, so launching a dev build from ``dist/`` never
+    takes over the user's login item.
+    """
+    app_path = _bundle_path()
+    installed_dirs = ("/Applications/", f"{Path.home()}/Applications/")
+    if not app_path.startswith(installed_dirs):
+        return
+    script = """
+on run argv
+    set appPath to item 1 of argv
+    set legacyName to item 2 of argv
+    tell application "System Events"
+        if (count of (every login item whose name is legacyName)) is 0 then return "none"
+        delete every login item whose name is legacyName
+        if (count of (every login item whose path is appPath)) is 0 then
+            make login item at end with properties {path:appPath, hidden:false}
+        end if
+        return "migrated"
+    end tell
+end run
+"""
+    try:
+        proc = _osascript(script, app_path, _LEGACY_LOGIN_ITEM_NAME)
+    except Exception:  # noqa: BLE001
+        log.exception("osascript failed while migrating legacy login item")
+        return
+    if proc.returncode != 0:
+        log.warning(
+            "Could not migrate legacy login item via System Events: %s",
+            (proc.stderr or proc.stdout or "unknown error").strip(),
+        )
+        return
+    if (proc.stdout or "").strip() == "migrated":
+        log.info("Moved legacy %s login item to %s", _LEGACY_LOGIN_ITEM_NAME, app_path)
 
 
 class _CredentialsDialogController(NSObject):
@@ -1026,7 +1072,7 @@ class GlucoseApp(rumps.App):
         poll_interval: int,
         thresholds: ColorThresholds,
     ):
-        super().__init__("···", quit_button="Quit Glucobar")
+        super().__init__("···", quit_button="Quit Gluco")
         self.poll_interval = poll_interval
         self.thresholds = thresholds
 
@@ -1044,8 +1090,8 @@ class GlucoseApp(rumps.App):
         self._startup_item = rumps.MenuItem(
             _FRONTEND_STARTUP_TITLE, callback=self._on_toggle_startup
         )
-        self._about_item = rumps.MenuItem("About Glucobar", callback=self._on_about)
-        self._reload_item = rumps.MenuItem("Restart Glucobar", callback=self._on_reload)
+        self._about_item = rumps.MenuItem("About Gluco", callback=self._on_about)
+        self._reload_item = rumps.MenuItem("Restart Gluco", callback=self._on_reload)
 
         # The menubar title carries the full status story (number, trend
         # arrow, or an error glyph), so the dropdown holds no text row —
@@ -1072,6 +1118,7 @@ class GlucoseApp(rumps.App):
             self._reload_item,
         ]
         self._update_startup_item()
+        _run_in_background(self._migrate_login_item_then_refresh)
 
         self._client = DaemonClient(base_url=base_url)
 
@@ -1571,7 +1618,7 @@ class GlucoseApp(rumps.App):
         _show_about_panel()
 
     def _on_reload(self, _sender) -> None:
-        log.info("Restart clicked; relaunching Glucobar")
+        log.info("Restart clicked; relaunching Gluco")
         _relaunch_app()
 
     def _on_refresh(self, _sender) -> None:
@@ -1599,7 +1646,7 @@ class GlucoseApp(rumps.App):
             self._show_alert(
                 title="Couldn’t sign out.",
                 message=(
-                    "Glucobar couldn’t remove your email and password from your "
+                    "Gluco couldn’t remove your email and password from your "
                     "keychain. Unlock your keychain in Keychain Access, then try again."
                 ),
             )
@@ -1664,7 +1711,7 @@ class GlucoseApp(rumps.App):
             if not email or not password:
                 self._show_alert(
                     title="Enter your email and password.",
-                    message="Glucobar needs both to sign in to LibreView.",
+                    message="Gluco needs both to sign in to LibreView.",
                 )
                 continue
             try:
@@ -1674,7 +1721,7 @@ class GlucoseApp(rumps.App):
                 self._show_alert(
                     title="Couldn’t save your sign-in.",
                     message=(
-                        "Glucobar couldn’t save your email and password to your "
+                        "Gluco couldn’t save your email and password to your "
                         "keychain. Try again."
                     ),
                 )
@@ -1696,7 +1743,7 @@ class GlucoseApp(rumps.App):
             self._show_alert(
                 title="You’re signed in.",
                 message=(
-                    "Glucobar is connecting to LibreView now. Your first reading "
+                    "Gluco is connecting to LibreView now. Your first reading "
                     "should appear in the menu bar shortly."
                 ),
             )
@@ -1705,6 +1752,10 @@ class GlucoseApp(rumps.App):
     def _update_startup_item(self) -> None:
         enabled = _frontend_startup_enabled()
         self._startup_item._menuitem.setState_(1 if enabled else 0)
+
+    def _migrate_login_item_then_refresh(self) -> None:
+        _migrate_legacy_login_item()
+        self._refresh_startup_item()
 
     def _refresh_startup_item(self) -> None:
         """Background-thread variant: query off-main, apply on main."""
@@ -1812,13 +1863,13 @@ end run
             if not email:
                 self._show_alert(
                     title="Enter your email.",
-                    message="Glucobar needs your LibreView email to sign in.",
+                    message="Gluco needs your LibreView email to sign in.",
                 )
                 continue
             if not password:
                 self._show_alert(
                     title="Enter your password.",
-                    message="Glucobar needs your LibreView password to sign in.",
+                    message="Gluco needs your LibreView password to sign in.",
                 )
                 continue
 
@@ -1829,7 +1880,7 @@ end run
                 self._show_alert(
                     title="Couldn’t save your sign-in.",
                     message=(
-                        "Glucobar couldn’t save your email and password to your "
+                        "Gluco couldn’t save your email and password to your "
                         "keychain. Try again."
                     ),
                 )
@@ -1849,7 +1900,7 @@ end run
             _run_on_main_and_wait(lambda: self._on_tick(None))
             self._show_alert(
                 title="You’re signed in.",
-                message="Glucobar is reconnecting to LibreView with your updated details.",
+                message="Gluco is reconnecting to LibreView with your updated details.",
             )
             return
 
