@@ -16,4 +16,4 @@ def package_version() -> str:
 
         return version("gluco")
     except Exception:
-        return "1.0.5"
+        return "1.0.6"
