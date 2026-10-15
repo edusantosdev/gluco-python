@@ -4,7 +4,7 @@ Run this BEFORE doing anything else in the project. If it prints a glucose
 value, the rest of the architecture is worth building. If it fails, read
 the error and fix that first (region wrong, ToS not accepted, etc.).
 
-Reads credentials from the macOS Keychain (the only place GlucoBar
+Reads credentials from the macOS Keychain (the only place Glucobar
 stores them). If none are present, seed them first::
 
     .venv/bin/python scripts/set_credentials.py

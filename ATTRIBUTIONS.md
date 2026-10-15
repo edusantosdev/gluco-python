@@ -1,14 +1,14 @@
 # Open source and third-party acknowledgments
 
-GlucoBar is distributed under the **Apache License 2.0**. See `LICENSE` and `NOTICE`.
+Glucobar is distributed under the **Apache License 2.0**. See `LICENSE` and `NOTICE`.
 
 ## App icon (graphic asset)
 
-The droplet shape used for `GlucoBar.icns` and the Icon Composer icon `GlucoBar.icon` is from **`scripts/app_bundle/drop-svgrepo-com.svg`**, the [“Drop” icon on SVG Repo](https://www.svgrepo.com/svg/478761/drop) (SVG Repo #478761). SVG Repo lists this asset under its [Public Domain (PD) license](https://www.svgrepo.com/page/licensing/#PD), so it can be used, modified, and redistributed without attribution; it is credited here as a courtesy.
+The droplet shape used for `Glucobar.icns` and the Icon Composer icon `Glucobar.icon` is from **`scripts/app_bundle/drop-svgrepo-com.svg`**, the [“Drop” icon on SVG Repo](https://www.svgrepo.com/svg/478761/drop) (SVG Repo #478761). SVG Repo lists this asset under its [Public Domain (PD) license](https://www.svgrepo.com/page/licensing/#PD), so it can be used, modified, and redistributed without attribution; it is credited here as a courtesy.
 
 `scripts/build_glucobar_icns.py` rasterizes that path with AppKit and runs Apple’s `iconutil` to produce the `.icns` file.
 
-`scripts/app_bundle/GlucoBar.icon/Assets/drop.svg` is the same path, filled white and placed on a 1024×1024 canvas. `scripts/compile_app_icon.sh` compiles the `.icon` with Apple’s `actool` into the bundle’s `Assets.car` (the Liquid Glass icon on macOS 26+).
+`scripts/app_bundle/Glucobar.icon/Assets/drop.svg` is the same path, filled white and placed on a 1024×1024 canvas. `scripts/compile_app_icon.sh` compiles the `.icon` with Apple’s `actool` into the bundle’s `Assets.car` (the Liquid Glass icon on macOS 26+).
 
 ## macOS & Apple frameworks
 

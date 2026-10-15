@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Render GlucoBar.app icon assets (black tile + white droplet) and build ``GlucoBar.icns``.
+"""Render Glucobar.app icon assets (black tile + white droplet) and build ``Glucobar.icns``.
 
 Requires macOS (uses AppKit drawing + ``iconutil``). Run from the repo root::
 
     .venv/bin/python scripts/build_glucobar_icns.py
 
-Output: ``scripts/app_bundle/GlucoBar.icns``
+Output: ``scripts/app_bundle/Glucobar.icns``
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_OUT_ICNS = _REPO_ROOT / "scripts" / "app_bundle" / "GlucoBar.icns"
+_OUT_ICNS = _REPO_ROOT / "scripts" / "app_bundle" / "Glucobar.icns"
 _DROP_SVG = _REPO_ROOT / "scripts" / "app_bundle" / "drop-svgrepo-com.svg"
 _DROP_VIEWBOX_SIZE = 512.0
 _SVG_PATH_TOKEN = re.compile(
@@ -203,7 +203,7 @@ def main() -> int:
         return 2
 
     with tempfile.TemporaryDirectory(prefix="glucobar_iconset_") as tmp:
-        iconset = Path(tmp) / "GlucoBar.iconset"
+        iconset = Path(tmp) / "Glucobar.iconset"
         iconset.mkdir()
         for filename, px in _ICONSET_ENTRIES:
             img = _draw_app_icon(px)

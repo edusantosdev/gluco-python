@@ -1,20 +1,20 @@
 <p align="center">
-  <img src="assets/icon.png" width="128" alt="GlucoBar app icon: a white droplet on a black rounded square">
+  <img src="assets/icon.png" width="128" alt="Glucobar app icon: a white droplet on a black rounded square">
 </p>
 
-<h1 align="center">GlucoBar</h1>
+<h1 align="center">Glucobar</h1>
 
-GlucoBar puts your latest glucose reading and trend in the macOS menu bar, so
+Glucobar puts your latest glucose reading and trend in the macOS menu bar, so
 you can stay on top of your diabetes **without breaking your focus**.
 
 <p align="center">
-  <img src="assets/screenshot.png" width="500" alt="GlucoBar in the macOS menu bar showing 76 with a steady arrow, and its menu open with the glucose graph">
+  <img src="assets/screenshot.png" width="500" alt="Glucobar in the macOS menu bar showing 76 with a steady arrow, and its menu open with the glucose graph">
 </p>
 
 Checking your phone pulls you out of whatever you're doing: unlock, open the
 app, wait, and then the notifications get you. When you're deep in work, in
 the zone, or just distracted, it's easy to put that check off and not notice
-a high or a low until it's already affecting you. GlucoBar keeps the number
+a high or a low until it's already affecting you. Glucobar keeps the number
 in the corner of your screen. A quick glance at `124 ↗` tells you whether
 you're in range, rising, or dropping, and you're back to work in a second.
 
@@ -31,15 +31,15 @@ For releases, see `RELEASING.md`.
 
 ## Important: your phone must stay connected
 
-GlucoBar does **not** talk to your sensor. It only shows what your phone has
+Glucobar does **not** talk to your sensor. It only shows what your phone has
 already uploaded to LibreView:
 
 ```
-Libre sensor ──Bluetooth──▶ Libre app on your phone ──internet──▶ LibreView ──▶ GlucoBar
+Libre sensor ──Bluetooth──▶ Libre app on your phone ──internet──▶ LibreView ──▶ Glucobar
 ```
 
-If any link in that chain breaks, GlucoBar stops getting new readings. For
-GlucoBar to stay current, **all of the following must be true, all the time**:
+If any link in that chain breaks, Glucobar stops getting new readings. For
+Glucobar to stay current, **all of the following must be true, all the time**:
 
 - The official Libre app (FreeStyle LibreLink / FreeStyle Libre 3) is
 **running on your phone** — open or in the background. Do not force-quit it
@@ -54,32 +54,32 @@ aggressive battery optimisation on Android can delay or stop uploads.
 - The sensor is active (not warming up, expired, or failed) and you have
 accepted any pending Terms/Privacy prompts in the Libre app.
 
-When readings stop arriving, GlucoBar keeps showing the last value with an
+When readings stop arriving, Glucobar keeps showing the last value with an
 asterisk (for example `124 ↗*`) once it is more than 6 minutes old. **Treat a
 starred value as out of date** — check your phone or meter instead.
 
 ## Known limitations
 
-- **Unofficial API that may stop working.** GlucoBar reads data through the
+- **Unofficial API that may stop working.** Glucobar reads data through the
 unofficial LibreLinkUp API (via
 [`pylibrelinkup`](https://pypi.org/project/pylibrelinkup/)). Abbott has
 released LibreLinkUp API v5, which encrypts glucose data so third-party
-tools can't read it. GlucoBar only works while Abbott keeps the older API
-running. When Abbott turns it off, GlucoBar (like other community LibreView
+tools can't read it. Glucobar only works while Abbott keeps the older API
+running. When Abbott turns it off, Glucobar (like other community LibreView
 tools) will stop getting readings, possibly with no notice. There is no
 plan to work around the v5 encryption.
-- **Readings are delayed.** Values go sensor → phone → LibreView → GlucoBar,
-and GlucoBar checks LibreView every 60 seconds. Expect the menu bar to run
+- **Readings are delayed.** Values go sensor → phone → LibreView → Glucobar,
+and Glucobar checks LibreView every 60 seconds. Expect the menu bar to run
 a minute or more behind your phone, and longer if the phone uploads late
 (see [above](#important-your-phone-must-stay-connected)).
-- **No alarms.** GlucoBar does not alert, notify, or make sounds for highs or
+- **No alarms.** Glucobar does not alert, notify, or make sounds for highs or
 lows. Keep using the official Libre app's alarms.
 - **Signs in with your LibreView account.** Use the same email and password
-as LibreView.com. GlucoBar shows the readings LibreView makes available to
+as LibreView.com. Glucobar shows the readings LibreView makes available to
 that account through LibreLinkUp. If LibreView lists nobody for the account,
-GlucoBar shows `⚠ Sign In`; setting up sharing in the Libre app
+Glucobar shows `⚠ Sign In`; setting up sharing in the Libre app
 (Connected Apps → LibreLinkUp) usually fixes it.
-- **One patient only.** If several people share with the account, GlucoBar
+- **One patient only.** If several people share with the account, Glucobar
 shows the first one LibreView returns. There's no picker yet.
 - **Short history.** The graph covers the last 12 hours, which is all the
 history LibreView returns through this API. There are no long-term reports.
@@ -91,7 +91,7 @@ history LibreView returns through this API. There are no long-term reports.
 
 ## Disclaimer
 
-GlucoBar is **not a medical device** and must not be used for diagnosis,
+Glucobar is **not a medical device** and must not be used for diagnosis,
 treatment, dosing, emergency decisions, or any other medical decision.
 Glucose values may be delayed, missing, or wrong. Always confirm with your
 official LibreView/LibreLink app, a meter, or a qualified professional.
@@ -142,11 +142,11 @@ warning below still applies to Homebrew installs.
 
 ## Install from a GitHub release
 
-1. Download `GlucoBar-vX.Y.Z-macos.zip` from the
+1. Download `Glucobar-vX.Y.Z-macos.zip` from the
   [Releases](https://github.com/edusantosdev/glucobar-python/releases) page.
    Optionally check it against the `.sha256` file:
-   `shasum -a 256 -c GlucoBar-vX.Y.Z-macos.zip.sha256`
-2. Unzip it and move `GlucoBar.app` to `/Applications`.
+   `shasum -a 256 -c Glucobar-vX.Y.Z-macos.zip.sha256`
+2. Unzip it and move `Glucobar.app` to `/Applications`.
 3. Open it (see below for the first-launch warning).
 
 
@@ -157,8 +157,8 @@ Release builds are **not signed with an Apple Developer ID and not notarized
 by Apple**. Notarization is Apple's automated malware scan for apps
 distributed outside the App Store, and it requires a paid Apple Developer
 account. It is not a code review. Without it, Gatekeeper blocks the first
-launch with *"GlucoBar.app" Not Opened: Apple could not verify
-"GlucoBar.app" is free of malware…* and only **Move to Trash** / **Done**
+launch with *"Glucobar.app" Not Opened: Apple could not verify
+"Glucobar.app" is free of malware…* and only **Move to Trash** / **Done**
 buttons. Click **Done**, not Move to Trash. This does not mean the app was found to be
 harmful; macOS just has no Apple-issued signature to check.
 
@@ -166,12 +166,12 @@ To open it anyway (needed only once per downloaded version):
 
 - **macOS 15 Sequoia and later:** try to open the app, dismiss the warning,
 then go to **System Settings → Privacy & Security**, scroll down to the
-message about GlucoBar, click **Open Anyway**, and confirm.
-- **macOS 14 and earlier:** right-click (or Control-click) `GlucoBar.app` in
+message about Glucobar, click **Open Anyway**, and confirm.
+- **macOS 14 and earlier:** right-click (or Control-click) `Glucobar.app` in
 Finder, choose **Open**, then click **Open** in the dialog.
 - **Terminal alternative (any version):** remove the download quarantine flag:
   ```bash
-  xattr -dr com.apple.quarantine /Applications/GlucoBar.app
+  xattr -dr com.apple.quarantine /Applications/Glucobar.app
   ```
 
 Only do this for a zip you downloaded from this repository's Releases page.
@@ -184,10 +184,10 @@ If you'd rather not trust a prebuilt binary, build the app from source
 python3.11 -m venv .venv
 .venv/bin/python -m pip install -e '.[dev,build]'
 scripts/build_portable_app.sh
-open dist/GlucoBar.app
+open dist/Glucobar.app
 ```
 
-After building, you can launch `dist/GlucoBar.app` directly from Finder
+After building, you can launch `dist/Glucobar.app` directly from Finder
 (or move it to `/Applications`).
 
 Optional `.env` for non-credential settings:
@@ -232,17 +232,17 @@ Menu actions:
 - `Refresh` — force daemon re-auth + immediate UI update
 - `Open at Login` — toggle macOS login item registration for next login
 - `Sign In to LibreView Account…` / `Sign Out of LibreView Account` — manage Keychain credentials
-- `About GlucoBar` — version, author, repository link, license, and disclaimer
-- `Restart GlucoBar` — quit and reopen the app and its daemon
-- `Quit GlucoBar`
+- `About Glucobar` — version, author, repository link, license, and disclaimer
+- `Restart Glucobar` — quit and reopen the app and its daemon
+- `Quit Glucobar`
 
 
 
 ## Configuration
 
-Credentials are Keychain-only. Only the menubar app (`GlucoBar`) reads
+Credentials are Keychain-only. Only the menubar app (`Glucobar`) reads
 Keychain; it forwards credentials to the daemon subprocess
-(`GlucoBarDaemon`) via env, so you only see a single "GlucoBar wants to
+(`GlucobarDaemon`) via env, so you only see a single "Glucobar wants to
 access the glucobar Keychain item" dialog — click **Always Allow** and
 you're set. The bundled `.app` is ad-hoc code-signed by
 `scripts/build_portable_app.sh` so the grant persists across launches
@@ -281,7 +281,7 @@ For the full release flow (tag, publish, update tap), see `RELEASING.md`.
 - Value has a `*` / readings stopped updating: the problem is almost always on
 the phone side. Open the Libre app on your phone and check that it shows a
 current reading, Bluetooth is on, the phone is near the sensor and online, and
-the app wasn't force-quit. Once the phone uploads again, GlucoBar catches up
+the app wasn't force-quit. Once the phone uploads again, Glucobar catches up
 on its next poll.
 - Account/region issues: run `.venv/bin/python scripts/phase0_probe.py`.
 - Missing credentials: open the app once or run `.venv/bin/python scripts/set_credentials.py`.

@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Only the latest release of GlucoBar receives security fixes.
+Only the latest release of Glucobar receives security fixes.
 
 ## Reporting a vulnerability
 

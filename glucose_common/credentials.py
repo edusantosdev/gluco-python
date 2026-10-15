@@ -24,7 +24,7 @@ Source-of-truth ordering
 The daemon prefers credentials passed in its environment (set by the
 menubar supervisor) over a direct Keychain read. This avoids a second
 Keychain authorisation dialog for the daemon subprocess: the frontend
-binary (``GlucoBar``) is the only process that ever touches Keychain, and
+binary (``Glucobar``) is the only process that ever touches Keychain, and
 hands credentials to the daemon child via env. Direct ``python -m daemon``
 dev launches still fall back to Keychain when env vars are absent.
 """
