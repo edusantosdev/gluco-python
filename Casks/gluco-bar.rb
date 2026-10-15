@@ -1,13 +1,13 @@
 cask "gluco-bar" do
-  version "1.0.4"
-  sha256 "810f7186a0a26b431a8c42f1e0fe35cd111960547f951cb83743d294b8d0a6d9"
+  version "1.0.5"
+  sha256 "164717c3df6899ca88971d6adde6deb4f60ee399b51671fb1a83722e83083a96"
 
-  url "https://github.com/edusantosdev/glucobar-python/releases/download/v#{version}/GlucoBar-v#{version}-macos.zip"
-  name "GlucoBar"
+  url "https://github.com/edusantosdev/glucobar-python/releases/download/v#{version}/Glucobar-v#{version}-macos.zip"
+  name "Glucobar"
   desc "macOS menubar glucose display backed by LibreView"
   homepage "https://github.com/edusantosdev/glucobar-python"
 
-  app "GlucoBar.app"
+  app "Glucobar.app"
 
   zap trash: [
     "~/.glucobar",
