@@ -4,7 +4,7 @@ Gluco is distributed under the **Apache License 2.0**. See `LICENSE` and `NOTICE
 
 ## App icon (graphic asset)
 
-The icon artwork is **`scripts/app_bundle/Gluco.icon/Assets/artwork.png`**, a 1024×1024 image of a glossy droplet on a gradient.
+The icon artwork is **`scripts/app_bundle/Gluco.icon/Assets/artwork.png`**, a 1024×1024 image of a glossy red droplet on a light cream background.
 
 `scripts/compile_app_icon.sh` compiles the Icon Composer icon `Gluco.icon`, which uses that image as its only layer, with Apple’s `actool` into the bundle’s `Assets.car` (the icon on macOS 26+).
 

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icon.png" width="128" alt="Gluco app icon: a glossy red droplet on a pink-to-blue gradient">
+  <img src="assets/icon.png" width="128" alt="Gluco app icon: a glossy red droplet on a light cream background">
 </p>
 
 <h1 align="center">Gluco</h1>
