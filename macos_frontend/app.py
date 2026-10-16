@@ -940,6 +940,7 @@ class GlucoseApp(rumps.App):
 
         self.menu = [
             self._graph_item,
+            None,
             self._refresh_item,
             None,
             self._startup_item,
