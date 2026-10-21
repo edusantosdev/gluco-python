@@ -1,6 +1,6 @@
 cask "gluco" do
-  version "1.0.8"
-  sha256 "a569b99bf49c26672e64faab862c4305b368b7aedd478a26119d68b4049b2871"
+  version "1.0.9"
+  sha256 "bea3df28b7555dc2e056f14a72b840fbbb32ef53922d87540efa8168c92eaaef"
 
   url "https://github.com/edusantosdev/gluco-python/releases/download/v#{version}/Gluco-v#{version}-macos.zip"
   name "Gluco"
