@@ -73,6 +73,7 @@ from macos_frontend.api_client import (  # noqa: E402
 )
 from macos_frontend.graph_view import GlucoseGraphView, GraphThresholds  # noqa: E402
 from macos_frontend.menu_truncation import truncate_email_for_menu  # noqa: E402
+from macos_frontend.offline_restart import OfflineRestartPolicy  # noqa: E402
 
 # Graph sits in the dropdown under the freshness text row.
 # 12 hours matches the history LibreView returns (and the daemon retains),
@@ -909,7 +910,8 @@ class GlucoseApp(rumps.App):
 
         self._daemon_unreachable = False
         self._last_daemon_status: str = "starting"
-        self._refresh_item = rumps.MenuItem("Refresh", callback=self._on_refresh)
+        self._offline_restart = OfflineRestartPolicy()
+        self._refresh_item =rumps.MenuItem("Refresh", callback=self._on_refresh)
         # Latest sensor timestamp (UTC datetime) used to recompute the
         # refresh row label live when the menu opens, instead
         # of relying on the daemon's pre-baked ``reading_age_seconds``
@@ -1193,6 +1195,14 @@ class GlucoseApp(rumps.App):
     # --- timer / menu callbacks ---
 
     def _on_tick(self, _sender) -> None:
+        self._poll_daemon()
+        if self._offline_restart.observe(self._last_daemon_status):
+            # ``restart()`` blocks until the old child exits; keep it off
+            # the main thread. No-op when attached to an external daemon.
+            log.warning("Offline for too long; restarting daemon")
+            _run_in_background(_kickstart_daemon)
+
+    def _poll_daemon(self) -> None:
         # Enforce a local logged-out state whenever the Keychain is empty,
         # even if an externally-managed daemon still has a live session.
         if not _has_stored_credentials():
