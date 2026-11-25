@@ -73,7 +73,11 @@ from macos_frontend.api_client import (  # noqa: E402
 )
 from macos_frontend.graph_view import GlucoseGraphView, GraphThresholds  # noqa: E402
 from macos_frontend.menu_truncation import truncate_email_for_menu  # noqa: E402
+from macos_frontend.notifications import AlertEngine, Observation  # noqa: E402
+from macos_frontend.notifications_menu import NotificationsMenu  # noqa: E402
+from macos_frontend.notifier import Notifier  # noqa: E402
 from macos_frontend.offline_restart import OfflineRestartPolicy  # noqa: E402
+from macos_frontend.thresholds_dialog import show_thresholds_dialog  # noqa: E402
 
 # Graph sits in the dropdown under the freshness text row.
 # 12 hours matches the history LibreView returns (and the daemon retains),
@@ -118,6 +122,7 @@ _THRESHOLD_VERY_HIGH_MG_DL = 250.0
 _FIRST_RUN_PROMPT_DELAY_S = 0.3
 _STATE_DIR = Path(os.environ.get("DAEMON_STATE_DIR", str(Path.home() / ".glucobar"))).expanduser()
 _KEYCHAIN_NOTICE_SENTINEL = _STATE_DIR / ".keychain_notice_seen"
+_NOTIFICATION_PREFS_PATH = _STATE_DIR / "notifications.json"
 _KEYCHAIN_NOTICE_TITLE = "About the Keychain Prompt"
 _KEYCHAIN_NOTICE_MESSAGE = (
     "Gluco keeps your LibreView email and password in your keychain. "
@@ -917,6 +922,27 @@ class GlucoseApp(rumps.App):
         # of relying on the daemon's pre-baked ``reading_age_seconds``
         # which only refreshes once per poll.
         self._last_sensor_dt: datetime | None = None
+        # Latest successful ``/glucose/current`` payload (``None`` after a
+        # failed poll) and the account's display unit, which survives
+        # failed polls so the notification thresholds keep their unit.
+        self._last_reading: CurrentReading | None = None
+        self._last_unit: str | None = None
+        # Newest sensor timestamp ever seen, for the "no new data" alert.
+        # Unlike ``_last_sensor_dt`` it survives a daemon restart that
+        # comes back with no reading yet, so a long outage still alerts.
+        self._alert_sensor_dt: datetime | None = None
+
+        self._notifier = Notifier()
+        self._alert_engine = AlertEngine()
+        self._notifications_menu = NotificationsMenu(
+            prefs_path=_NOTIFICATION_PREFS_PATH,
+            notifier=self._notifier,
+            get_unit=lambda: self._last_unit,
+            show_alert=self._show_alert,
+            run_in_background=_run_in_background,
+            run_on_main_and_wait=_run_on_main_and_wait,
+            show_thresholds_dialog=show_thresholds_dialog,
+        )
         self._creds_item = rumps.MenuItem(
             _SIGN_IN_MENU_PRIMARY_TITLE, callback=self._on_first_run_credentials
         )
@@ -945,6 +971,7 @@ class GlucoseApp(rumps.App):
             None,
             self._refresh_item,
             None,
+            self._notifications_menu.item,
             self._startup_item,
             self._creds_item,
             None,
@@ -1196,19 +1223,43 @@ class GlucoseApp(rumps.App):
 
     def _on_tick(self, _sender) -> None:
         self._poll_daemon()
+        self._evaluate_alerts()
         if self._offline_restart.observe(self._last_daemon_status):
             # ``restart()`` blocks until the old child exits; keep it off
             # the main thread. No-op when attached to an external daemon.
             log.warning("Offline for too long; restarting daemon")
             _run_in_background(_kickstart_daemon)
 
+    def _evaluate_alerts(self) -> None:
+        """Feed the latest poll into the alert engine and deliver any alerts."""
+        reading = self._last_reading
+        obs = Observation(
+            status=self._last_daemon_status,
+            value_mg_dl=reading.value_in_mg_per_dl if reading else None,
+            value=reading.value if reading else None,
+            unit=reading.unit if reading else self._last_unit,
+            trend=reading.trend if reading else None,
+            trend_symbol=reading.trend_symbol if reading else None,
+            sensor_dt=self._alert_sensor_dt,
+        )
+        prefs = self._notifications_menu.prefs
+        try:
+            alerts = self._alert_engine.evaluate(prefs, obs)
+        except Exception:  # noqa: BLE001
+            log.exception("Alert evaluation failed")
+            return
+        for alert in alerts:
+            self._notifier.send(alert, sound=prefs.sound)
+
     def _poll_daemon(self) -> None:
+        self._last_reading = None
         # Enforce a local logged-out state whenever the Keychain is empty,
         # even if an externally-managed daemon still has a live session.
         if not _has_stored_credentials():
             self._daemon_unreachable = False
             self._last_daemon_status = "logged_out"
             self._last_sensor_dt = None
+            self._alert_sensor_dt = None
             self._apply_title_parts("⚠ Sign In", "", "", color=None)
             self._graph_view.setPoints_([])
             self._update_refresh_item()
@@ -1251,6 +1302,10 @@ class GlucoseApp(rumps.App):
 
         self._daemon_unreachable = False
         self._last_daemon_status = reading.status
+        self._last_reading = reading
+        if reading.unit and reading.unit != self._last_unit:
+            self._last_unit = reading.unit
+            self._notifications_menu.refresh()
         value_part, arrow_part, trailing_part = _title_parts(reading)
         # Only colour when we actually have a numeric value to evaluate.
         # Stale readings still get coloured (the value is the most recent
@@ -1262,6 +1317,10 @@ class GlucoseApp(rumps.App):
         self._apply_title_parts(value_part, arrow_part, trailing_part, color=color)
 
         self._last_sensor_dt = _parse_sensor_timestamp(reading.sensor_timestamp)
+        if self._last_sensor_dt is not None and (
+            self._alert_sensor_dt is None or self._last_sensor_dt > self._alert_sensor_dt
+        ):
+            self._alert_sensor_dt = self._last_sensor_dt
         self._update_refresh_item()
         self._refresh_graph()
 

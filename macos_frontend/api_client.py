@@ -68,6 +68,7 @@ class CurrentReading:
     reading_age_seconds: int | None
     fetch_age_seconds: int | None
     last_error: str | None = None
+    trend: str | None = None  # falling_fast | falling | stable | rising | rising_fast
 
     @classmethod
     def from_payload(cls, data: dict[str, Any]) -> CurrentReading:
@@ -80,6 +81,7 @@ class CurrentReading:
             sensor_timestamp=data.get("sensor_timestamp"),
             reading_age_seconds=data.get("reading_age_seconds"),
             fetch_age_seconds=data.get("fetch_age_seconds"),
+            trend=data.get("trend"),
         )
 
 

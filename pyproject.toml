@@ -35,6 +35,9 @@ dependencies = [
     # Menubar UI; pulls in pyobjc-framework-Cocoa, which gives us
     # ``AppKit`` and ``Foundation`` for the native dialogs in the frontend.
     "rumps>=0.4.0",
+    # macOS glucose alerts via UNUserNotificationCenter (rumps only wraps
+    # the deprecated NSUserNotification API). Keep in step with pyobjc-core.
+    "pyobjc-framework-UserNotifications>=12.2",
     # ``.env`` loader used by the daemon, the frontend, and the probe.
     "python-dotenv>=1.2.4",
     # Keychain bridge for credentials.
