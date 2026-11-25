@@ -76,6 +76,9 @@ OPTIONS = {
         "dotenv",
         "keyring",
         "pylibrelinkup",
+        # PyObjC bridge for glucose alerts (imported by
+        # macos_frontend.notifier); listed so py2app always bundles it.
+        "UserNotifications",
     ],
     # Test-only (dev extra), never imported by the app:
     # * httpx2 & deps — via fastapi.testclient -> starlette.testclient
