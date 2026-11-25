@@ -18,6 +18,10 @@ a high or a low until it's already affecting you. Gluco keeps the number
 in the corner of your screen. A quick glance at `124 ↗` tells you whether
 you're in range, rising, or dropping, and you're back to work in a second.
 
+It can also send a macOS notification when you go low or high, when glucose
+is rising or falling fast, or when new readings stop arriving (see
+[Notifications](#notifications)).
+
 It doesn't replace the official Libre app. It's a convenience viewer for the
 same LibreView data, and you still need the phone app for alarms and for
 uploading readings.
@@ -72,8 +76,10 @@ plan to work around the v5 encryption.
 and Gluco checks LibreView every 60 seconds. Expect the menu bar to run
 a minute or more behind your phone, and longer if the phone uploads late
 (see [above](#important-your-phone-must-stay-connected)).
-- **No alarms.** Gluco does not alert, notify, or make sounds for highs or
-lows. Keep using the official Libre app's alarms.
+- **Notifications are not alarms.** Gluco's optional
+[notifications](#notifications) arrive a minute or more after your phone's,
+only while your Mac is awake and online, and they don't get through Focus or
+Do Not Disturb. Keep using the official Libre app's alarms.
 - **Signs in with your LibreView account.** Use the same email and password
 as LibreView.com. Gluco shows the readings LibreView makes available to
 that account through LibreLinkUp. If LibreView lists nobody for the account,
@@ -246,11 +252,38 @@ attaches to it instead of spawning its own.
 Menu actions:
 
 - `Refresh` — force daemon re-auth + immediate UI update
+- `Notifications ▸` — glucose alerts (see [Notifications](#notifications))
 - `Open at Login` — toggle macOS login item registration for next login
 - `Sign In to LibreView Account…` / `Sign Out of LibreView Account` — manage Keychain credentials
 - `About Gluco` — version, author, repository link, license, and disclaimer
 - `Restart Gluco` — quit and reopen the app and its daemon
 - `Quit Gluco`
+
+## Notifications
+
+Gluco can send macOS notifications for glucose events. They're off until you
+choose **Notifications ▸ Enable Notifications**, which asks macOS for
+permission. If you deny it, allow Gluco later in **System Settings →
+Notifications** and turn it on again.
+
+| Menu item | What it does |
+|---|---|
+| **Low**, **High**, **Very High** | Notify when glucose goes below Low or above High / Very High. The labels show the current thresholds in your account's unit. With Very High off, a very high reading counts as High. |
+| **Rising or Falling Fast (↑ ↓)** | Notify when LibreView shows the fast ↑ or ↓ arrow. Once per episode, and at most every 15 minutes per direction. |
+| **No New Data ▸** | Notify once when no new reading has arrived for 10, 20, 30 or 60 minutes, or turn it off. |
+| **Thresholds ▸** | **Default** uses 70 / 180 / 250 mg/dL. **Custom…** lets you enter your own values in your account's unit. Thresholds only affect notifications, not the menu bar colors. |
+| **Repeat Alerts ▸** | **Only Once** per high or low, or remind you every 10, 15, 30 or 60 minutes while you're still out of range. |
+| **Play Sound** | Turn the notification sound on or off. |
+| **Send Test Notification** | Check that notifications are allowed and showing. |
+
+A high or low alert resets once you're back in range. To count as back in
+range, the reading has to be 5 mg/dL past the threshold, so a value hovering
+right on the line doesn't notify you over and over. Going from High to Very
+High notifies you again; coming back down doesn't.
+
+Notifications run on your Mac, from the same delayed LibreView data as the
+menu bar (see [Known limitations](#known-limitations)). They stop when your
+Mac is asleep or Gluco isn't running.
 
 
 
@@ -279,6 +312,10 @@ Fixed runtime defaults:
 - frontend poll interval: 30s
 - stale cutoff: 360s
 - color thresholds: `<70`, `70-180`, `180-250`, `>250` mg/dL
+
+Notification settings are changed from the **Notifications ▸** menu and
+saved in `notifications.json` in the state directory (`~/.glucobar` unless
+`DAEMON_STATE_DIR` is set).
 
 
 

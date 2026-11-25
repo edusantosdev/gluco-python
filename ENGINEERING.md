@@ -155,8 +155,10 @@ Kept intentionally small:
 Explicit non-goals, for now:
 
 - Multi-user / multi-patient support
-- In-app threshold editing
-- Desktop alerting as a headline feature
+- In-app editing of the menu bar color thresholds (notification
+  thresholds are editable from the Notifications menu)
+- Alarm-grade alerting: notifications are a convenience on delayed
+  LibreView data, and the Libre app owns alarms
 - Broad distro/package parity before the macOS path is solid
 
 ## Version and legal metadata
